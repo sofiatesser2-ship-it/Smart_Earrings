@@ -1,1 +1,29 @@
-aa
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.preprocessing import StandardScaler
+
+# 1. Carica il dataset
+df = pd.read_csv('il_tuo_file_estratto.csv') 
+
+# 2. Definisci le Feature (X) e il Target (y)
+# Assicurati che i nomi delle colonne corrispondano a quelli nel tuo CSV
+features = ['RMSSD', 'SDNN', 'BPM', 'LF_HF_ratio']
+X = df[features]
+y = df['label'] # La colonna che indica lo stato (es. 0 o 1)
+
+# 3. Scaling (Fondamentale per i segnali fisiologici)
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+# 4. Split dei dati
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, stratify=y, random_state=42)
+
+# 5. Training del modello
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
+
+# 6. Valutazione
+y_pred = model.predict(X_test)
+print(classification_report(y_test, y_pred))
