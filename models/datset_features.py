@@ -1,10 +1,10 @@
 import pandas as pd
 import numpy as np
 import os
-from scipy.signal import welch, detrend
+from scipy.signal import welch
 from scipy.interpolate import interp1d
 
-# --- 1. PARSING DIARIO (CORRETTO) ---
+# --- 1. FUNZIONI DI PARSING E TECNICHE ---
 def get_subject_times_split(quest_path):
     try:
         df_q = pd.read_csv(quest_path, sep=None, engine='python', header=None).astype(str)
@@ -32,54 +32,73 @@ def get_subject_times_split(quest_path):
     except:
         return None
 
-# --- 2. FUNZIONI TECNICHE ---
 def calculate_lf_hf(ibi_ms):
     try:
-        if len(ibi_ms) < 20: return 0
+        if len(ibi_ms) < 20: return np.nan # Abbassato per coerenza con soglia 20
         times = np.cumsum(ibi_ms) / 1000.0
         f_interp = interp1d(times, ibi_ms, kind='cubic', fill_value="extrapolate")
         t_res = np.arange(times[0], times[-1], 0.25)
-        resampled = detrend(f_interp(t_res))
-        f, psd = welch(resampled, fs=4, nperseg=min(len(resampled), 256))
+        
+        signal = f_interp(t_res)
+        signal = signal - np.mean(signal)
+        
+        nperseg = min(len(signal), 256)
+        f, psd = welch(signal, fs=4, nperseg=nperseg)
+        
         lf = np.sum(psd[(f >= 0.04) & (f <= 0.15)])
         hf = np.sum(psd[(f >= 0.15) & (f <= 0.40)])
-        return lf / hf if hf > 1e-10 else 0
+        
+        return lf / hf if hf > 1e-6 else np.nan
     except:
-        return 0
+        return np.nan
 
 def clean_ibi(ibi_ms):
-    clean = ibi_ms[(ibi_ms >= 350) & (ibi_ms <= 1500)]
-    return clean if len(clean) >= 15 else np.array([])
+    # MODIFICA: Allargati i range (300-1600) e ridotta soglia minima (20)
+    clean = ibi_ms[(ibi_ms >= 300) & (ibi_ms <= 1600)]
+    return clean if len(clean) >= 20 else np.array([])
 
-# --- 3. ESTRAZIONE  ---
+# --- 2. ESTRAZIONE ---
 def extract_features_complete(subject_id, base_path):
     sub_folder = os.path.join(base_path, subject_id)
     ibi_p = os.path.join(sub_folder, f"{subject_id}_E4_Data", "IBI.csv")
     quest_p = os.path.join(sub_folder, f"{subject_id}_quest.csv")
     
-    if not os.path.exists(ibi_p) or not os.path.exists(quest_p):
-        return None
-    
+    if not os.path.exists(ibi_p) or not os.path.exists(quest_p): return None
     tasks = get_subject_times_split(quest_p)
     if not tasks: return None
 
     df_ibi = pd.read_csv(ibi_p, skiprows=1, names=['offset', 'ibi'])
     df_ibi['bpm_tmp'] = 60 / df_ibi['ibi']
+    
+    # Sincronizzazione
     peak_time = df_ibi.loc[df_ibi['bpm_tmp'].rolling(50).mean().idxmax(), 'offset']
     sync_shift = peak_time - (tasks['Social_Stress'][0] + 150)
 
     features = []
+    window_size = 120 
+    step = 10         
+
     for label, (start, end) in tasks.items():
         s_f, e_f = start + sync_shift, end + sync_shift
-        # Step=2 per avere molti più dati (Overlap)
-        for sw in np.arange(s_f, e_f - 60, 2): 
-            win = df_ibi[(df_ibi['offset'] >= sw) & (df_ibi['offset'] < sw+60)]['ibi'].values * 1000
+        
+        # DEBUG AGGIUNTO
+        print(f"DEBUG: Soggetto {subject_id} - Task: {label} | Range: {s_f:.1f} - {e_f:.1f}")
+        
+        if (e_f - s_f) < window_size:
+            print(f"   -> SALTATO: {label} troppo breve per {subject_id}")
+            continue
+
+        for sw in np.arange(s_f, e_f - window_size, step): 
+            win = df_ibi[(df_ibi['offset'] >= sw) & (df_ibi['offset'] < sw + window_size)]['ibi'].values * 1000
             win = clean_ibi(win)
-            if len(win) >= 15:
+            
+            # MODIFICA: Soglia >= 20
+            if len(win) >= 20:
                 bpm = 60000 / np.mean(win)
                 rmssd = np.sqrt(np.mean(np.diff(win)**2))
                 sdnn = np.std(win)
                 lf_hf = calculate_lf_hf(win)
+                
                 features.append({
                     'Subject': subject_id, 'BPM': bpm, 'RMSSD': rmssd, 
                     'SDNN': sdnn, 'LF_HF': lf_hf, 'Label': label
@@ -87,28 +106,38 @@ def extract_features_complete(subject_id, base_path):
     
     df = pd.DataFrame(features)
     if df.empty or 'Baseline' not in df['Label'].values: return None
-    
+
+    # Normalizzazione
+    df = df.dropna(subset=['BPM', 'RMSSD', 'SDNN'])
     cols = ['BPM', 'RMSSD', 'SDNN', 'LF_HF']
     base_means = df[df['Label'] == 'Baseline'][cols].mean()
+    
+    if base_means.isnull().any(): return None
+    
     for c in cols:
         if base_means[c] > 0:
             df[c] = df[c] / base_means[c]
-            df[c] = np.clip(df[c], 0.1, 10.0)
             
-    return df
+    return df.dropna()
 
-# --- 4. MAIN ---
+# --- 3. MAIN ---
 if __name__ == "__main__":
     BASE_PATH = r"C:\Users\arima\Desktop\Progetto\WESAD"
     subjects = ['S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S13', 'S14', 'S15', 'S16', 'S17']
     all_dfs = []
 
+    print("Inizio estrazione (Step 10s)...")
     for s in subjects:
         df_s = extract_features_complete(s, BASE_PATH)
         if df_s is not None:
             all_dfs.append(df_s)
-            print(f"Soggetto {s} estratto con successo (BPM, RMSSD, SDNN, LF/HF).")
+            print(f"Soggetto {s} estratto correttamente.")
 
     if all_dfs:
-        pd.concat(all_dfs, ignore_index=True).to_csv('wesad_complete_ratio.csv', index=False)
-        print("\nDataset completo salvato: 'wesad_complete_ratio.csv'")
+        final_df = pd.concat(all_dfs, ignore_index=True)
+        final_df.to_csv('wesad_complete_ratio.csv', index=False)
+        print("\nDataset salvato: 'wesad_complete_ratio.csv'")
+        print(f"Righe totali: {len(final_df)}")
+        print(final_df.groupby('Label').size())
+    else:
+        print("Nessun dato estratto.")
