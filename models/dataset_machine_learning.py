@@ -8,15 +8,15 @@ from sklearn.model_selection import train_test_split, cross_val_score, Stratifie
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.pipeline import Pipeline
+from sklearn.inspection import permutation_importance # <-- NUOVA IMPORTAZIONE
 from imblearn.over_sampling import SMOTE 
 
 # Modelli
 from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
-from interpret.glassbox import ExplainableBoostingClassifier # EBM
+from interpret.glassbox import ExplainableBoostingClassifier 
 from sklearn.svm import SVC
-from sklearn.linear_model import LogisticRegression
 
 # Ottimizzazione
 import optuna
@@ -53,17 +53,22 @@ def load_and_prepare_data(file_path):
 def evaluate_model(clf, X_test, y_test, model_name="Modello", label_encoder=None):
     y_pred = clf.predict(X_test)
     
+    # Gestione nomi classi
     if label_encoder is not None:
-        y_pred = label_encoder.inverse_transform(y_pred)
+        y_pred_labels = label_encoder.inverse_transform(y_pred)
+        # Se y_test è già testo, lo usiamo così com'è
+        y_test_labels = y_test if isinstance(y_test.iloc[0], str) else label_encoder.inverse_transform(y_test)
         classes = label_encoder.classes_
     else:
+        y_pred_labels = y_pred
+        y_test_labels = y_test
         if isinstance(clf, Pipeline):
             classes = clf.classes_
         else:
             classes = clf.classes_ if hasattr(clf, 'classes_') else np.unique(y_test)
     
-    acc = accuracy_score(y_test, y_pred)
-    report = classification_report(y_test, y_pred)
+    acc = accuracy_score(y_test_labels, y_pred_labels)
+    report = classification_report(y_test_labels, y_pred_labels)
     
     print(f"\n{'='*40}")
     print(f"--- PERFORMANCE DEL MODELLO: {model_name} ---")
@@ -71,9 +76,9 @@ def evaluate_model(clf, X_test, y_test, model_name="Modello", label_encoder=None
     print("\nReport di Classificazione:")
     print(report)
 
-    # Matrice di Confusione
+    # 1. Matrice di Confusione
     plt.figure(figsize=(8, 6))
-    cm = confusion_matrix(y_test, y_pred, labels=classes)
+    cm = confusion_matrix(y_test_labels, y_pred_labels, labels=classes)
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=classes, yticklabels=classes)
     plt.title(f'Matrice di Confusione: {model_name}', fontsize=14)
     plt.ylabel('Verità (Actual)')
@@ -82,28 +87,39 @@ def evaluate_model(clf, X_test, y_test, model_name="Modello", label_encoder=None
     plt.savefig(f'matrice_confusione_{model_name.replace(" ", "_")}.png')
     plt.close()
     
-    # Importanza delle Feature (Standard)
+    # 2. Logica Avanzata per l'Importanza delle Feature
+    importances = None
+    
+    # Caso A: Modelli con importanza nativa (RF, XGB, LGBM)
     if hasattr(clf, 'feature_importances_'):
-        plt.figure(figsize=(8, 5))
-        feat_importances = pd.Series(clf.feature_importances_, index=FEATURES)
-        feat_importances.sort_values(ascending=True).plot(kind='barh', color='teal')
-        plt.title(f'Importanza delle Feature ({model_name})')
-        plt.xlabel('Importanza Relativa')
-        plt.tight_layout()
-        plt.savefig(f'importanza_feature_{model_name.replace(" ", "_")}.png')
-        plt.close()
-        
-    # Importanza delle Feature SPECIALE per EBM
+        importances = clf.feature_importances_
+    
+    # Caso B: Modello EBM
     elif isinstance(clf, ExplainableBoostingClassifier):
         ebm_global = clf.explain_global()
-        data = ebm_global.data()
-        plt.figure(figsize=(10, 6))
-        pd.Series(data['scores'], index=data['names']).sort_values(ascending=True).plot(kind='barh', color='coral')
-        plt.title(f'Importanza Feature ({model_name})')
-        plt.xlabel('Impatto sul Modello')
-        plt.tight_layout()
-        plt.savefig(f'importanza_feature_{model_name.replace(" ", "_")}.png')
-        plt.close()
+        ebm_data = ebm_global.data()
+        importances = ebm_data['scores']
+
+    # Caso C (IL RISOLUTORE): Se il modello non ha importanza nativa (come SVM RBF)
+    # Calcoliamo la Permutation Importance
+    if importances is None:
+        print(f"Calcolo Permutation Importance per {model_name} (richiede tempo)...")
+        # Usiamo y_test originale se il modello si aspetta etichette numeriche (XGB/LGBM)
+        # o y_test_labels se il modello accetta testo (SVM/RF)
+        target_eval = y_test if label_encoder is not None and not isinstance(y_test.iloc[0], str) else y_test_labels
+        
+        r = permutation_importance(clf, X_test, target_eval, n_repeats=10, random_state=SEED, n_jobs=-1)
+        importances = r.importances_mean
+
+    # 3. Generazione Grafico
+    plt.figure(figsize=(8, 5))
+    feat_importances = pd.Series(importances, index=FEATURES)
+    feat_importances.sort_values(ascending=True).plot(kind='barh', color='teal')
+    plt.title(f'Importanza delle Feature ({model_name})')
+    plt.xlabel('Punteggio Importanza (Permutation o Nativa)')
+    plt.tight_layout()
+    plt.savefig(f'importanza_feature_{model_name.replace(" ", "_")}.png')
+    plt.close()
 
 # ==========================================
 # PARTE 2: TRAINING SPECIFICO DEI MODELLI
@@ -115,7 +131,6 @@ def train_random_forest(X_train, y_train):
     return clf
 
 def train_xgboost(X_train, y_train):
-    print("\nAvvio ottimizzazione Optuna per XGBoost...")
     le = LabelEncoder()
     y_train_encoded = le.fit_transform(y_train)
     
@@ -132,8 +147,7 @@ def train_xgboost(X_train, y_train):
         }
         clf = XGBClassifier(**param)
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
-        score = cross_val_score(clf, X_train, y_train_encoded, cv=cv, scoring='f1_macro').mean()
-        return score
+        return cross_val_score(clf, X_train, y_train_encoded, cv=cv, scoring='f1_macro').mean()
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(direction='maximize')
@@ -144,7 +158,6 @@ def train_xgboost(X_train, y_train):
     return best_clf, le
 
 def train_lightgbm(X_train, y_train):
-    print("\nAvvio ottimizzazione Optuna per LightGBM...")
     le = LabelEncoder()
     y_train_encoded = le.fit_transform(y_train)
     
@@ -161,8 +174,7 @@ def train_lightgbm(X_train, y_train):
         }
         clf = LGBMClassifier(**param)
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
-        score = cross_val_score(clf, X_train, y_train_encoded, cv=cv, scoring='f1_macro').mean()
-        return score
+        return cross_val_score(clf, X_train, y_train_encoded, cv=cv, scoring='f1_macro').mean()
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(direction='maximize')
@@ -173,7 +185,6 @@ def train_lightgbm(X_train, y_train):
     return best_clf, le
 
 def train_svm(X_train, y_train):
-    print("\nAvvio ottimizzazione Optuna per SVM (Support Vector Machine)...")
     def objective(trial):
         svm_c = trial.suggest_float('C', 0.1, 10.0, log=True)
         svm_kernel = trial.suggest_categorical('kernel', ['linear', 'rbf'])
@@ -183,8 +194,7 @@ def train_svm(X_train, y_train):
             ('svc', SVC(C=svm_c, kernel=svm_kernel, class_weight='balanced', random_state=SEED))
         ])
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
-        score = cross_val_score(clf, X_train, y_train, cv=cv, scoring='f1_macro', n_jobs=-1).mean()
-        return score
+        return cross_val_score(clf, X_train, y_train, cv=cv, scoring='f1_macro', n_jobs=-1).mean()
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(direction='maximize')
@@ -198,8 +208,6 @@ def train_svm(X_train, y_train):
     return best_clf
 
 def train_ebm(X_train, y_train):
-    print("\nAvvio training per Explainable Boosting Machine (EBM)...")
-    # MODIFICA FATTA QUI: interactions=0 per evitare il blocco sul dataset Multiclass
     clf = ExplainableBoostingClassifier(interactions=0, random_state=SEED, n_jobs=-1)
     clf.fit(X_train, y_train)
     return clf
@@ -208,38 +216,24 @@ def train_ebm(X_train, y_train):
 # PARTE 3: MOTORE DI ESECUZIONE
 # ==========================================
 if __name__ == "__main__":
-    print("Inizio fase di preparazione dati...")
     X_train, X_test, y_train, y_test = load_and_prepare_data(FILE_PATH)
     
-    print("\n" + "="*50)
-    print("INIZIO TRAINING DEI MODELLI (Questa è la volta buona!)")
-    print("="*50)
-    
     # 1. RANDOM FOREST
-    print("\n>>> 1/5: Allenamento RANDOM FOREST in corso...")
     modello_rf = train_random_forest(X_train, y_train)
     evaluate_model(modello_rf, X_test, y_test, model_name="Random Forest")
     
     # 2. XGBOOST
-    print("\n>>> 2/5: Allenamento XGBOOST in corso...")
     modello_xgb, le_xgb = train_xgboost(X_train, y_train)
     evaluate_model(modello_xgb, X_test, y_test, model_name="XGBoost", label_encoder=le_xgb)
     
     # 3. LIGHTGBM
-    print("\n>>> 3/5: Allenamento LIGHTGBM in corso...")
     modello_lgb, le_lgb = train_lightgbm(X_train, y_train)
     evaluate_model(modello_lgb, X_test, y_test, model_name="LightGBM", label_encoder=le_lgb)
 
-    # 4. SVM
-    print("\n>>> 4/5: Allenamento SVM in corso...")
+    # 4. SVM (Ora genererà il grafico!)
     modello_svm = train_svm(X_train, y_train)
     evaluate_model(modello_svm, X_test, y_test, model_name="SVM")
 
-    # 5. EBM (CORRETTO!)
-    print("\n>>> 5/5: Allenamento EBM (Explainable Boosting) in corso...")
+    # 5. EBM 
     modello_ebm = train_ebm(X_train, y_train)
     evaluate_model(modello_ebm, X_test, y_test, model_name="EBM")
-    
-    print("\n" + "="*50)
-    print("TUTTI I 5 MODELLI COMPLETATI CON SUCCESSO! GRAFICI SALVATI!")
-    print("="*50)
