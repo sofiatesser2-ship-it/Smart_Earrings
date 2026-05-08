@@ -8,7 +8,7 @@ from sklearn.model_selection import train_test_split, cross_val_score, Stratifie
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.pipeline import Pipeline
-from sklearn.inspection import permutation_importance # <-- NUOVA IMPORTAZIONE
+from sklearn.inspection import permutation_importance 
 from imblearn.over_sampling import SMOTE 
 
 # Modelli
@@ -48,7 +48,6 @@ def load_and_prepare_data(file_path):
     print(f"Distribuzione Dopo Oversampling:\n{y_train_resampled.value_counts()}")
 
     return X_train_resampled, X_test, y_train_resampled, y_test
-
 
 def evaluate_model(clf, X_test, y_test, model_name="Modello", label_encoder=None):
     y_pred = clf.predict(X_test)

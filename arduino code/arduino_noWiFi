@@ -1,0 +1,35 @@
+// Configurazione del Pin
+const int pulsePin = A0; // Pin per il PulseSensor
+
+
+// Impostazioni di campionamento
+const unsigned long sampleInterval = 5; // 5 millisecondi = 200 Hz (200 letture al secondo)
+unsigned long lastSampleTime = 0;
+
+
+void setup() {
+  // Avviamo la comunicazione seriale a una velocità elevata
+  Serial.begin (115200);
+  analogReadResolution(12);
+  pinMode (pulsePin, INPUT);
+}
+
+void loop() {
+  unsigned long currentSampleTime = millis();
+
+
+  // Eseguiamo la lettura solo se è trascorso l'intervallo prefissato
+  if (currentSampleTime - lastSampleTime >= sampleInterval){
+    lastSampleTime += sampleInterval; // Aggiorna il contatore del tempo
+
+
+    // Lettura dei dati grezzi
+    int rawPulse = analogRead (pulsePin);
+
+
+    // Invio dei dati al computer
+    Serial.print (currentSampleTime);
+    Serial.print (",");
+    Serial.println (rawPulse);
+  }
+}

@@ -1,0 +1,60 @@
+#include <SPI.h>
+#include <WiFiNINA.h>
+#include <WiFiUdp.h>
+
+// --- IMPOSTAZIONI DI RETE ---
+const char* SSID = "iPhone di Sara";       // Il nome della tua rete
+const char* PASSWORD = "saravalerio";       // La password della rete
+const char* PC_IP = "172.20.10.2";        // Inserisci qui l'indirizzo IP del tuo computer
+const int UDP_PORT = 5005;
+
+WiFiUDP udp;
+
+// --- IMPOSTAZIONI SENSORE ---
+const int pulsePin = A0;
+const unsigned long sampleInterval = 5;     // 5ms = 200Hz
+unsigned long lastSampleTime = 0;
+
+void setup() {
+  Serial.begin(115200);
+  analogReadResolution(12);
+  pinMode(pulsePin, INPUT);
+
+  // Connessione al Wi-Fi
+  Serial.print("Connessione in corso a: ");
+  Serial.println(SSID);
+  
+  WiFi.begin(SSID, PASSWORD);
+  
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  
+  Serial.println("\nConnesso al Wi-Fi! Board IP: ");
+  Serial.println(WiFi.localIP());
+
+  // Inizializza il protocollo UDP
+  udp.begin(UDP_PORT);
+}
+
+void loop() {
+  unsigned long currentSampleTime = millis();
+
+  // Controllo per mantenere la frequenza di campionamento (200Hz)
+  if (currentSampleTime - lastSampleTime >= sampleInterval) {
+    lastSampleTime += sampleInterval;
+    int rawPulse = analogRead(pulsePin);
+    
+    // Inizia la composizione del pacchetto UDP da inviare al PC
+    udp.beginPacket(PC_IP, UDP_PORT);
+    
+    // Inviamo i dati con formattazione CSV: "tempo,valore"
+    udp.print(currentSampleTime);
+    udp.print(",");
+    udp.println(rawPulse); // Il println aggiunge il ritorno a capo (utile per Python)
+    
+    // Invia fisicamente il pacchetto sulla rete
+    udp.endPacket();
+  }
+}
