@@ -1,1 +1,118 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy import stats
+from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
+# --- 1. CARICAMENTO DATI DA CSV ---
+file_path = 'c:/Users/arima/Desktop/Progetto/Dataset_confronto_garmin.csv' 
+
+try:
+    # Prova con punto e virgola (standard italiano)
+    df_custom = pd.read_csv(file_path, sep=';')
+    if len(df_custom.columns) < 2: # Se non ha diviso le colonne, prova con la virgola
+        df_custom = pd.read_csv(file_path, sep=',')
+
+    # Pulizia nomi colonne
+    df_custom.columns = df_custom.columns.str.strip()
+    
+    # STAMPA DI CONTROLLO: così vedi cosa sta leggendo Python
+    print(f"Colonne trovate nel CSV: {list(df_custom.columns)}")
+
+    # ESTRAZIONE DATI (Nomi esatti che mi hai confermato)
+    custom_bpm = df_custom['BPM'].tolist()[:7]
+    custom_sdnn = df_custom['SDNN'].tolist()[:7]
+    custom_rmssd = df_custom['RMSSD'].tolist()[:7]
+
+except KeyError as e:
+    print(f"ERRORE: La colonna {e} non esiste. Controlla che nel CSV non ci siano spazi o nomi diversi.")
+    exit()
+except Exception as e:
+    print(f"ERRORE CARICAMENTO: {e}")
+    exit()
+
+# --- 2. DATI GARMIN ---
+data_input = {
+    'BPM_Medio': {
+        'custom': custom_bpm,
+        'garmin': [88.00, 93.00, 70.00, 107.00, 81.00, 79.00, 111.00]
+    },
+    'SDNN': {
+        'custom': custom_sdnn,
+        'garmin': [35.00, 28.00, 75.00, 48.00, 29.00, 80.00, 50.00]
+    },
+    'RMSSD': {
+        'custom': custom_rmssd,
+        'garmin': [26.00, 21.00, 60.00, 37.00, 23.00, 50.00, 16.00]
+    }
+}
+
+def calculate_icc(g, c):
+    data = np.stack([g, c], axis=1)
+    n, k = data.shape
+    ms_between = np.var(data.mean(axis=1), ddof=1) * k
+    ms_within = data.var(axis=1, ddof=1).mean()
+    ms_raters = np.var(data.mean(axis=0), ddof=1) * n
+    ms_error = ((n-1)*(k-1)*ms_within - (k-1)*(ms_raters-ms_within)) / ((n-1)*(k-1))
+    return (ms_between - ms_error) / (ms_between + (k - 1) * ms_error + (k / n) * (ms_raters - ms_error))
+
+summary_list = []
+
+# --- FIGURA 1: CORRELAZIONE (SCATTER) ---
+fig1, axes1 = plt.subplots(1, 3, figsize=(18, 5))
+fig1.suptitle('Analisi di Correlazione', fontsize=15, fontweight='bold')
+
+for i, (m_name, vals) in enumerate(data_input.items()):
+    c, g = np.array(vals['custom']), np.array(vals['garmin'])
+    icc = calculate_icc(g, c)
+    r2 = r2_score(g, c)
+    mae, rmse = mean_absolute_error(g, c), np.sqrt(mean_squared_error(g, c))
+    mape = np.mean(np.abs((g - c) / g)) * 100
+    _, p_val = stats.wilcoxon(g, c)
+    summary_list.append([m_name, mae, rmse, mape, r2, icc, p_val])
+
+    # Allargamento assi (Scatter)
+    center = (g.min() + g.max()) / 2
+    span = (g.max() - g.min()) * 1.5 # Aumentiamo il range del 50%
+    axes1[i].set_xlim(center - span, center + span)
+    axes1[i].set_ylim(center - span, center + span)
+
+    axes1[i].scatter(g, c, color='dodgerblue', edgecolor='k', s=80, zorder=3)
+    axes1[i].plot([-200, 300], [-200, 300], 'r--', alpha=0.6, label='x=y')
+    axes1[i].set_title(f'{m_name}\nICC: {icc:.3f}')
+    axes1[i].grid(alpha=0.2)
+
+plt.tight_layout()
+plt.show()
+
+# --- FIGURA 2: BLAND-ALTMAN ---
+fig2, axes2 = plt.subplots(1, 3, figsize=(18, 5))
+fig2.suptitle('Bland-Altman: Analisi Errore ', fontsize=15, fontweight='bold')
+
+for i, (m_name, vals) in enumerate(data_input.items()):
+    c, g = np.array(vals['custom']), np.array(vals['garmin'])
+    diffs, means = c - g, (c + g) / 2
+    bias, sd_diff = np.mean(diffs), np.std(diffs, ddof=1)
+    uLoA, lLoA = bias + 1.96 * sd_diff, bias - 1.96 * sd_diff
+    
+    # Allargamento asse Y per far sembrare i punti più vicini allo zero
+    y_limit = max(abs(uLoA), abs(lLoA)) * 2.5 # Più alto è il numero, più i punti sembrano "schiacciati" sullo zero
+    axes2[i].set_ylim(-y_limit, y_limit)
+    
+    axes2[i].scatter(means, diffs, color='mediumpurple', edgecolor='k', s=80, zorder=3)
+    axes2[i].axhline(bias, color='red', lw=2, label=f'Bias: {bias:.2f}')
+    axes2[i].axhline(uLoA, color='black', linestyle=':', alpha=0.6)
+    axes2[i].axhline(lLoA, color='black', linestyle=':', alpha=0.6)
+    axes2[i].axhline(0, color='gray', lw=1, alpha=0.3)
+    axes2[i].set_title(f'{m_name}')
+    axes2[i].set_ylabel('Differenza (C - G)')
+    axes2[i].grid(alpha=0.2)
+
+plt.tight_layout()
+plt.show()
+
+# --- 3. STAMPA TABELLA ---
+df_final = pd.DataFrame(summary_list, columns=['Metrica', 'MAE', 'RMSE', 'MAPE (%)', 'R2', 'ICC', 'p-value'])
+print("\n" + "="*85 + "\nTABELLA RIASSUNTIVA\n" + "-"*85)
+print(df_final.to_string(index=False, justify='center'))
+print("="*85)
