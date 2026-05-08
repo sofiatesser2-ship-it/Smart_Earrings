@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from scipy import stats
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
-# --- 1. CARICAMENTO DATI DA CSV ---
+# --- 1. CARICAMENTO DATI DA CSV ----
 file_path = 'c:/Users/arima/Desktop/Progetto/Dataset_confronto_garmin.csv' 
 
 try:
