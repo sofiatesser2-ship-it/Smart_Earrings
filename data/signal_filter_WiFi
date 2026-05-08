@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import butter, filtfilt, iirnotch, medfilt
 
 # --- CONFIGURAZIONE ---
-UDP_IP = "172.20.10.5"       # <-- L'IP del tuo PC sulla rete dell'iPhone
+UDP_IP = "0.0.0.0"       # <-- L'IP del tuo PC sulla rete dell'iPhone
 UDP_PORT = 5005              # La stessa porta impostata su Arduino
 FILE_NAME = 'ppg_200Hz_filtrato.csv'
 FS = 200.0  
