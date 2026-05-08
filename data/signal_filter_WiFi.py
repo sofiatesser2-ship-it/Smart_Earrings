@@ -4,48 +4,36 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.signal import butter, filtfilt, iirnotch, medfilt
+import traceback
 
 # --- CONFIGURAZIONE ---
-UDP_IP = "0.0.0.0"       # <-- L'IP del tuo PC sulla rete dell'iPhone
-UDP_PORT = 5005              # La stessa porta impostata su Arduino
+UDP_IP = "0.0.0.0"       # Ascolta su tutte le reti
+UDP_PORT = 5005              
 FILE_NAME = 'ppg_200Hz_filtrato.csv'
 FS = 200.0  
 
 # --- FUNZIONI DI ELABORAZIONE ---
-
 def calcola_snr(segnale_originale, segnale_filtrato):
-    """Calcola il Signal-to-Noise Ratio in dB"""
     orig_clean = segnale_originale - np.mean(segnale_originale)
     filt_clean = segnale_filtrato - np.mean(segnale_filtrato)
-    
     rumore = orig_clean - filt_clean
-    
     potenza_segnale = np.sum(filt_clean**2)
     potenza_rumore = np.sum(rumore**2)
-    
     if potenza_rumore == 0: return 0
-    
-    snr_db = 10 * np.log10(potenza_segnale / potenza_rumore)
-    return snr_db
+    return 10 * np.log10(potenza_segnale / potenza_rumore)
 
 def applica_filtri_avanzati(data_raw):
     x = np.array(data_raw, dtype=float)
-    
-    # 1. NOTCH FILTER (50 Hz)
-    f0 = 50.0
-    Q = 30.0
-    b_n, a_n = iirnotch(f0, Q, FS)
+    # Notch
+    b_n, a_n = iirnotch(50.0, 30.0, FS)
     y_notch = filtfilt(b_n, a_n, x)
-    
-    # 2. BUTTERWORTH BANDPASS (0.5 - 4 Hz)
+    # Butterworth
     low = 0.5 / (0.5 * FS)
     high = 4.0 / (0.5 * FS)
     b_b, a_b = butter(2, [low, high], btype='band')
     y_butter = filtfilt(b_b, a_b, y_notch)
-    
-    # 3. MEDIAN FILTER
+    # Median
     y_median = medfilt(y_butter, kernel_size=7)
-    
     return y_notch, y_butter, y_median
 
 # --- LOOP DI ACQUISIZIONE ---
@@ -53,68 +41,53 @@ raw_buffer = []
 time_buffer = []
 
 try:
-    # Inizializzazione della connessione UDP
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_IP, UDP_PORT))
     print(f"In ascolto per dati UDP sull'IP {UDP_IP} alla porta {UDP_PORT}...")
-    print(f"Acquisizione a {FS}Hz avviata. Premi CTRL+C per terminare e processare i dati.")
+    print(f"Acquisizione a {FS}Hz avviata. Premi CTRL+C per terminare.")
 
+    # Questo è il ciclo infinito che lo tiene acceso
     while True:
         data, addr = sock.recvfrom(1024)
         line = data.decode('utf-8', errors='ignore').strip()
         
         if line:
             try:
-                # Separiamo il tempo e il valore
                 t_str, v_str = line.split(',')
-                t = int(t_str)
-                v = int(v_str)
-                
+                t, v = int(t_str), int(v_str)
                 time_buffer.append(t)
                 raw_buffer.append(v)
-                
-                # Stampa a schermo (se l'acquisizione scatta o rallenta, commenta questa riga con un #)
                 print(f"t={t} ms  value={v}")
-                
             except ValueError:
-                # Se arriva un pacchetto corrotto, lo ignoriamo
                 continue
 
 except KeyboardInterrupt:
-    print("\n\nAcquisizione interrotta. Elaborazione in corso...")
-    
+    print("\n\nAcquisizione interrotta volontariamente. Elaborazione in corso...")
     if len(raw_buffer) > 50:
         y_n, y_b, y_final = applica_filtri_avanzati(raw_buffer)
-        
-        # Calcolo SNR
         snr_val = calcola_snr(np.array(raw_buffer), y_final)
-        print("-" * 40)
         print(f"ANALISI COMPLETATA - SNR: {snr_val:.2f} dB")
-        print("-" * 40)
         
         with open(FILE_NAME, mode='w', newline='') as file:
             writer = csv.writer(file)
             writer.writerow(['Timestamp', 'Raw', 'Notch_50Hz', 'Butterworth', 'Final_Result', 'Artifact', 'SNR'])
-            
             for i in range(len(raw_buffer)):
                 slope = abs(raw_buffer[i] - raw_buffer[i-1]) if i > 0 else 0
                 is_artifact = 1 if (slope > 200 or raw_buffer[i] > 1010 or raw_buffer[i] < 10) else 0
-
-                writer.writerow([
-                    time_buffer[i],
-                    raw_buffer[i],
-                    round(y_n[i], 2),
-                    round(y_b[i], 2),
-                    round(y_final[i], 2),
-                    is_artifact,
-                    round(snr_val, 2)
-                ])
+                writer.writerow([time_buffer[i], raw_buffer[i], round(y_n[i], 2), round(y_b[i], 2), round(y_final[i], 2), is_artifact, round(snr_val, 2)])
         print(f"Salvataggio completato in: {FILE_NAME}")
     else:
         print("Dati insufficienti per l'elaborazione.")
 
+except Exception as e:
+    # SE CRASHA DI COLPO, STAMPERA' L'ERRORE QUI
+    print("\n" + "!"*50)
+    print("ERRORE CRITICO! IL PROGRAMMA SI È FERMATO PERCHÉ:")
+    print(e)
+    traceback.print_exc()
+    print("!"*50 + "\n")
+
 finally:
-    # Chiudiamo correttamente la porta UDP quando lo script si ferma
     if 'sock' in locals(): sock.close()
 
 # --- GENERAZIONE GRAFICI ---
@@ -122,43 +95,25 @@ def genera_grafici():
     try:
         df = pd.read_csv(FILE_NAME)
         valore_snr = df['SNR'].iloc[0]
-        
         fig, axs = plt.subplots(4, 1, figsize=(12, 10), sharex=True)
         fig.suptitle(f'Multistage PPG Signal Analysis - SNR: {valore_snr:.2f} dB', fontsize=16)
 
-        # 1. Raw Signal
         axs[0].plot(df['Timestamp'], df['Raw'], color='gray', alpha=0.6)
-        axs[0].set_title('1. Raw Signal (with Noise and Artifacts)')
-        axs[0].set_ylabel('ADC Amplitude')
-
-        # 2. After Notch
+        axs[0].set_title('1. Raw Signal')
         axs[1].plot(df['Timestamp'], df['Notch_50Hz'], color='blue')
-        axs[1].set_title('2. After Notch Filter (50 Hz removed)')
-        axs[1].set_ylabel('ADC Amplitude')
-
-        # 3. After Butterworth
+        axs[1].set_title('2. Notch Filter')
         axs[2].plot(df['Timestamp'], df['Butterworth'], color='orange')
-        axs[2].set_title('3. After Butterworth (Beat Isolation 0.5-4 Hz)')
-        axs[2].set_ylabel('Amplitude')
-
-        # 4. Final Result
+        axs[2].set_title('3. Butterworth Bandpass')
         axs[3].plot(df['Timestamp'], df['Final_Result'], color='green', linewidth=2)
         
-        # Visualizziamo comunque i punti degli artefatti per riferimento
         artifacts = df[df['Artifact'] == 1]
         axs[3].scatter(artifacts['Timestamp'], artifacts['Final_Result'], color='red', s=10)
-        
-        axs[3].set_title('4. Final result (median filter)')
-        axs[3].set_ylabel('Amplitude')
-        
-        plt.xlabel('Time (ms)')
-        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        axs[3].set_title('4. Final Result')
+        plt.tight_layout()
         plt.show()
-
     except FileNotFoundError:
-        pass # Se non ci sono file, salta i grafici senza errori extra
+        pass
 
 if __name__ == "__main__":
-    # Generiamo i grafici solo se ci sono dati salvati
     if len(raw_buffer) > 50:
         genera_grafici()
