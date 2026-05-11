@@ -1,0 +1,45 @@
+#include <Wire.h>
+#include <SparkFun_TMP117.h> // Assicurati di aver installato questa libreria
+
+// Crea un'istanza dell'oggetto sensore
+TMP117 sensor;
+
+// Impostazioni di campionamento
+const unsigned long sampleInterval = 100; // 1000 ms = 1 Hz (1 lettura al secondo)
+unsigned long lastSampleTime = 0;
+
+void setup() {
+  // Avviamo la comunicazione seriale a una velocità elevata
+  Serial.begin(115200);
+  
+  // Avvia il bus I2C per la comunicazione con il sensore
+  Wire.begin();
+
+  // Inizializza il sensore TMP117 all'indirizzo predefinito (0x48)
+  if (sensor.begin() == false) {
+    Serial.println("Errore: Sensore TMP117 non trovato. Controlla i cavi I2C!");
+    // Nota: il programma continuerà a girare, ma i dati non saranno corretti se non è connesso
+  }
+}
+
+void loop() {
+  unsigned long currentSampleTime = millis();
+
+  // Eseguiamo la lettura solo se è trascorso l'intervallo prefissato
+  if (currentSampleTime - lastSampleTime >= sampleInterval) {
+    lastSampleTime += sampleInterval; // Aggiorna il contatore del tempo
+
+    // Verifichiamo se il sensore ha una nuova misurazione pronta da leggere
+    if (sensor.dataReady() == true) {
+      
+      // Lettura dei dati della temperatura in gradi Celsius
+      float tempC = sensor.readTempC();
+
+      // Invio dei dati al computer nel formato: millisecondi,temperatura
+      Serial.print(currentSampleTime);
+      Serial.print(",");
+      Serial.println(tempC, 4); // Mantiene 4 cifre decimali per l'alta precisione
+      
+    }
+  }
+}
