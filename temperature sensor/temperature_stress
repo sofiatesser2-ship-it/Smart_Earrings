@@ -1,60 +1,68 @@
-import serial
+import socket
 import time
 
-# CONFIGURAZIONI 
-PORTA_SERIALE = 'COM5' 
-BAUD_RATE = 115200
+# --- CONFIGURAZIONI RETE ---
+# L'IP deve essere quello del tuo PC (lo stesso messo nell'Arduino: 10.207.94.246)
+IP_PC = "0.0.0.0" # "0.0.0.0" significa "ascolta da tutte le interfacce di rete"
+PORTA_UDP = 5005
 
-# Soglie fisiologiche stimate per la temperatura cutanea (lobo dell'orecchio)
-SOGLIA_STRESS = 31.5      # Sotto questo valore: Vasocostrizione (Stress)
-SOGLIA_RILASSAMENTO = 34.0 # Sopra questo valore: Vasodilatazione (Rilassamento)
+# Soglie fisiologiche stimate
+SOGLIA_STRESS = 31.5
+SOGLIA_RILASSAMENTO = 34.0
 
-def avvia_acquisizione():
+def avvia_acquisizione_wifi():
+    # Creazione del socket UDP
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    
     try:
-        ser = serial.Serial(PORTA_SERIALE, BAUD_RATE, timeout=1)
-        print(f"Connesso con successo alla porta {PORTA_SERIALE}.")
-        print("--- RILEVAMENTO STRESS DA TEMPERATURA PERIFERICA ---")
+        # Associa il socket all'IP e alla porta
+        sock.bind((IP_PC, PORTA_UDP))
+        
+        print(f"Server UDP avviato sulla porta {PORTA_UDP}...")
+        print("In attesa di dati dall'Arduino MKR WiFi 1010...")
+        print("-" * 60)
         print(f"Soglia Stress (Freddo): < {SOGLIA_STRESS} °C")
         print(f"Soglia Rilassamento (Caldo): > {SOGLIA_RILASSAMENTO} °C\n")
         print("-" * 60)
-        
-        time.sleep(2) 
-        
-        while True:
-            if ser.in_waiting > 0:
-                linea = ser.readline().decode('utf-8').strip()
-                
-                if not linea or "," not in linea:
-                    continue
-                    
-                parti = linea.split(',')
-                
-                if len(parti) == 2:
-                    try:
-                        timestamp = int(parti[0])
-                        temperatura = float(parti[1])
-                        
-                        # STRESS = TEMPERATURA BASSA 
-                        if temperatura < SOGLIA_STRESS:
-                            stato = "SOTTO STRESS (Vasocostrizione)"
-                        elif temperatura > SOGLIA_RILASSAMENTO:
-                            stato = "RILASSATO (Vasodilatazione)"
-                        else:
-                            stato = "NORMALE"
-                            
-                        print(f"Tempo: {timestamp/1000:>6.1f} s | Temp: {temperatura:06.4f} °C | Stato: {stato}")
-                        
-                    except ValueError:
-                        pass
 
-    except serial.SerialException as e:
-        print(f"\nErrore: Impossibile aprire la porta {PORTA_SERIALE}.")
+        while True:
+            # Riceve i dati (buffer di 1024 byte)
+            data, addr = sock.recvfrom(1024)
+            
+            # Decodifica il messaggio ricevuto
+            linea = data.decode('utf-8').strip()
+            
+            if not linea or "," not in linea:
+                continue
+                
+            parti = linea.split(',')
+            
+            if len(parti) == 2:
+                try:
+                    timestamp = int(parti[0])
+                    temperatura = float(parti[1])
+                    
+                    # Logica Stress/Rilassamento
+                    if temperatura < SOGLIA_STRESS:
+                        stato = "SOTTO STRESS (Vasocostrizione)"
+                    elif temperatura > SOGLIA_RILASSAMENTO:
+                        stato = "RILASSATO (Vasodilatazione)"
+                    else:
+                        stato = "NORMALE"
+                    
+                    # Stampa i dati (aggiungendo l'indirizzo IP di origine per sicurezza)
+                    print(f"[{addr[0]}] Tempo: {timestamp/1000:>6.1f} s | Temp: {temperatura:06.4f} °C | Stato: {stato}")
+                    
+                except ValueError:
+                    pass
+
+    except Exception as e:
+        print(f"\nErrore del server: {e}")
     except KeyboardInterrupt:
-        print("\n\nAcquisizione interrotta.")
+        print("\n\nAcquisizione interrotta dall'utente.")
     finally:
-        if 'ser' in locals() and ser.is_open:
-            ser.close()
-            print("Porta seriale chiusa.")
+        sock.close()
+        print("Socket chiuso correttamente.")
 
 if __name__ == '__main__':
-    avvia_acquisizione()
+    avvia_acquisizione_wifi()

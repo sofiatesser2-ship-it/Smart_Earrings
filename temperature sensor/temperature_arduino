@@ -1,45 +1,72 @@
 #include <Wire.h>
-#include <SparkFun_TMP117.h> 
+#include <SparkFun_TMP117.h>
+#include <WiFiNINA.h>
+#include <WiFiUdp.h>
 
-// Crea un'istanza dell'oggetto sensore
+// --- IMPOSTAZIONI DI RETE ---
+const char* SSID = "Arianna";        
+const char* PASSWORD = "ariannaa";   
+const char* PC_IP = "10.207.94.246"; // L'IP del PC che riceve i dati
+const int UDP_PORT = 5005;
+
+WiFiUDP udp;
+
+// --- IMPOSTAZIONI SENSORE ---
 TMP117 sensor;
-
-// Impostazioni di campionamento
-const unsigned long sampleInterval = 100; // 1000 ms = 1 Hz (1 lettura al secondo)
+const unsigned long sampleInterval = 100; // 10Hz (una lettura ogni 100ms)
 unsigned long lastSampleTime = 0;
 
 void setup() {
-  // Avviamo la comunicazione seriale a una velocità elevata
   Serial.begin(115200);
-  
-  // Avvia il bus I2C per la comunicazione con il sensore
   Wire.begin();
 
-  // Inizializza il sensore TMP117 all'indirizzo predefinito (0x48)
+  // Inizializza il sensore TMP117
   if (sensor.begin() == false) {
-    Serial.println("Errore: Sensore TMP117 non trovato. Controlla i cavi I2C!");
-    // Nota: il programma continuerà a girare, ma i dati non saranno corretti se non è connesso
+    Serial.println("Errore: Sensore TMP117 non trovato!");
+    while (1); // Blocca l'esecuzione se il sensore non è presente
   }
+
+  // Connessione al Wi-Fi
+  Serial.print("Connessione in corso a: ");
+  Serial.println(SSID);
+  
+  WiFi.begin(SSID, PASSWORD);
+  
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  
+  Serial.println("\nConnesso! IP Board: ");
+  Serial.println(WiFi.localIP());
+
+  // Inizializza il protocollo UDP
+  udp.begin(UDP_PORT);
 }
 
 void loop() {
   unsigned long currentSampleTime = millis();
 
-  // Eseguiamo la lettura solo se è trascorso l'intervallo prefissato
+  // Mantenimento della frequenza di campionamento
   if (currentSampleTime - lastSampleTime >= sampleInterval) {
-    lastSampleTime += sampleInterval; // Aggiorna il contatore del tempo
+    lastSampleTime += sampleInterval;
 
-    // Verifichiamo se il sensore ha una nuova misurazione pronta da leggere
+    // Controlla se il dato è pronto
     if (sensor.dataReady() == true) {
-      
-      // Lettura dei dati della temperatura in gradi Celsius
       float tempC = sensor.readTempC();
 
-      // Invio dei dati al computer nel formato: millisecondi,temperatura
-      Serial.print(currentSampleTime);
-      Serial.print(",");
-      Serial.println(tempC, 4); // Mantiene 4 cifre decimali per l'alta precisione
+      // Invia pacchetto UDP
+      udp.beginPacket(PC_IP, UDP_PORT);
       
+      // Formato CSV: "tempo,temperatura"
+      udp.print(currentSampleTime);
+      udp.print(",");
+      udp.println(tempC, 4); // 4 decimali per alta precisione
+      
+      udp.endPacket();
+
+      // Debug opzionale su seriale
+      // Serial.println(tempC); 
     }
   }
 }
