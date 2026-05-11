@@ -1,0 +1,60 @@
+import serial
+import time
+
+# --- CONFIGURAZIONI ---
+PORTA_SERIALE = 'COM5' 
+BAUD_RATE = 115200
+
+# Soglie fisiologiche stimate per la temperatura cutanea (lobo dell'orecchio)
+SOGLIA_STRESS = 31.5      # Sotto questo valore: Vasocostrizione (Stress)
+SOGLIA_RILASSAMENTO = 34.0 # Sopra questo valore: Vasodilatazione (Rilassamento)
+
+def avvia_acquisizione():
+    try:
+        ser = serial.Serial(PORTA_SERIALE, BAUD_RATE, timeout=1)
+        print(f"Connesso con successo alla porta {PORTA_SERIALE}.")
+        print("--- RILEVAMENTO STRESS DA TEMPERATURA PERIFERICA ---")
+        print(f"Soglia Stress (Freddo): < {SOGLIA_STRESS} °C")
+        print(f"Soglia Rilassamento (Caldo): > {SOGLIA_RILASSAMENTO} °C\n")
+        print("-" * 60)
+        
+        time.sleep(2) 
+        
+        while True:
+            if ser.in_waiting > 0:
+                linea = ser.readline().decode('utf-8').strip()
+                
+                if not linea or "," not in linea:
+                    continue
+                    
+                parti = linea.split(',')
+                
+                if len(parti) == 2:
+                    try:
+                        timestamp = int(parti[0])
+                        temperatura = float(parti[1])
+                        
+                        # STRESS = TEMPERATURA BASSA 
+                        if temperatura < SOGLIA_STRESS:
+                            stato = "SOTTO STRESS (Vasocostrizione)"
+                        elif temperatura > SOGLIA_RILASSAMENTO:
+                            stato = "RILASSATO (Vasodilatazione)"
+                        else:
+                            stato = "NORMALE"
+                            
+                        print(f"Tempo: {timestamp/1000:>6.1f} s | Temp: {temperatura:06.4f} °C | Stato: {stato}")
+                        
+                    except ValueError:
+                        pass
+
+    except serial.SerialException as e:
+        print(f"\nErrore: Impossibile aprire la porta {PORTA_SERIALE}.")
+    except KeyboardInterrupt:
+        print("\n\nAcquisizione interrotta.")
+    finally:
+        if 'ser' in locals() and ser.is_open:
+            ser.close()
+            print("Porta seriale chiusa.")
+
+if __name__ == '__main__':
+    avvia_acquisizione()
