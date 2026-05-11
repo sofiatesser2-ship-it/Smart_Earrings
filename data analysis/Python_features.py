@@ -5,7 +5,7 @@ from scipy.signal import find_peaks, welch
 from scipy.interpolate import interp1d
 
 # IMPOSTAZIONI
-FILE_PATH = 'csv 170426 (3).csv'
+FILE_PATH = 'ppg_200Hz_filtrato.csv'
 COLONNA_SEGNALE = 'Final_Result'
 FS = 200
 
