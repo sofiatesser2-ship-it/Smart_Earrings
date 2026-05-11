@@ -1,1 +1,73 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from hrvanalysis import get_time_domain_features, get_frequency_domain_features
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from scipy.stats import wilcoxon, shapiro
+import pingouin as pg
 
+# 1. FUNZIONE PER CALCOLO PARAMETRI HRV (RR, BPM, RMSSD, SDNN, LF/HF)
+def calculate_hrv_metrics(rr_intervals):
+    # rr_intervals deve essere in millisecondi
+    time_domain = get_time_domain_features(rr_intervals)
+    freq_domain = get_frequency_domain_features(rr_intervals)
+    
+    return {
+        'rr_mean': np.mean(rr_intervals),
+        'bpm_mean': time_domain['mean_hr'],
+        'rmssd': time_domain['rmssd'],
+        'sdnn': time_domain['sdnn'],
+        'lf_hf': freq_domain['lf_hf_ratio']
+    }
+
+# 2. CARICAMENTO DATI
+# Supponiamo che il CSV di Embrace Plus contenga i picchi sistolici o intervalli IBI
+# Nota: Embrace Plus fornisce IBI.csv o file .avro convertibili
+df_embrace = pd.read_csv('embrace_plus_ibi.csv') 
+df_smart_earrings = pd.read_csv('smart_earrings_metrics.csv')
+
+# 3. ANALISI STATISTICA E VALIDAZIONE
+def validate_metrics(gold_standard, test_device, metric_name):
+    print(f"--- Validazione per: {metric_name} ---")
+    
+    # RMSE, MAE, MAPE, R^2
+    rmse = np.sqrt(mean_squared_error(gold_standard, test_device))
+    mae = mean_absolute_error(gold_standard, test_device)
+    mape = np.mean(np.abs((gold_standard - test_device) / gold_standard)) * 100
+    r2 = r2_score(gold_standard, test_device)
+    
+    # Test di normalità per scegliere Wilcoxon
+    _, p_norm = shapiro(gold_standard - test_device)
+    stat, p_wilcoxon = wilcoxon(gold_standard, test_device)
+    
+    # ICC (Intraclass Correlation Coefficient)
+    data_icc = pd.DataFrame({
+        'id': list(range(len(gold_standard))) * 2,
+        'device': ['gold']*len(gold_standard) + ['test']*len(test_device),
+        'score': np.concatenate([gold_standard, test_device])
+    })
+    icc = pg.intraclass_corr(data=data_icc, targets='id', raters='device', ratings='score')
+    
+    print(f"RMSE: {rmse:.2f} | MAE: {mae:.2f} | MAPE: {mape:.2f}% | R2: {r2:.2f}")
+    print(f"ICC (Absolute Agreement): {icc.iloc[2]['ICC']:.3f}") # ICC3: mixed effect
+    print(f"Wilcoxon p-value: {p_wilcoxon:.4f}")
+    
+    # BLAND-ALTMAN PLOT
+    mean_val = (gold_standard + test_device) / 2
+    diff = test_device - gold_standard
+    md = np.mean(diff)
+    sd = np.std(diff, axis=0)
+
+    plt.figure(figsize=(8, 5))
+    plt.scatter(mean_val, diff, alpha=0.5)
+    plt.axhline(md, color='red', linestyle='--', label=f'Bias: {md:.2f}')
+    plt.axhline(md + 1.96*sd, color='gray', linestyle='--')
+    plt.axhline(md - 1.96*sd, color='gray', linestyle='--')
+    plt.title(f'Bland-Altman Plot: {metric_name}')
+    plt.xlabel('Media dei due dispositivi')
+    plt.ylabel('Differenza (Test - Gold)')
+    plt.legend()
+    plt.show()
+
+# Esempio d'uso (da adattare ai tuoi array di dati)
+# validate_metrics(df_embrace['rmssd'], df_smart_earrings['rmssd'], 'RMSSD')
