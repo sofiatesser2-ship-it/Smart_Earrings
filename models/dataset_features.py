@@ -5,6 +5,26 @@ from scipy.signal import welch
 from scipy.interpolate import interp1d
 
 # --- 1. FUNZIONI DI PARSING E TECNICHE ---
+
+def calculate_poincare_features(ibi_ms):
+    """Calcola SD1 e SD2 dal Poincaré Plot."""
+    if len(ibi_ms) < 2:
+        return np.nan, np.nan
+    diff_ibi = np.diff(ibi_ms)
+    # SD1 rappresenta la variabilità a breve termine (correlata a RMSSD)
+    sd1 = np.sqrt(np.std(diff_ibi, ddof=1)**2 * 0.5)
+    # SD2 rappresenta la variabilità a lungo termine
+    sd2 = np.sqrt(2 * np.std(ibi_ms, ddof=1)**2 - 0.5 * np.std(diff_ibi, ddof=1)**2)
+    return sd1, sd2
+
+def calculate_pnn50(ibi_ms):
+    """Calcola la percentuale di intervalli IBI consecutivi che differiscono per più di 50ms."""
+    if len(ibi_ms) < 2:
+        return np.nan
+    diff_ibi = np.abs(np.diff(ibi_ms))
+    nn50 = np.sum(diff_ibi > 50)
+    return (nn50 / len(diff_ibi)) * 100
+
 def get_subject_times_split(quest_path):
     try:
         df_q = pd.read_csv(quest_path, sep=None, engine='python', header=None).astype(str)
@@ -34,7 +54,7 @@ def get_subject_times_split(quest_path):
 
 def calculate_lf_hf(ibi_ms):
     try:
-        if len(ibi_ms) < 20: return np.nan # Abbassato per coerenza con soglia 20
+        if len(ibi_ms) < 20: return np.nan 
         times = np.cumsum(ibi_ms) / 1000.0
         f_interp = interp1d(times, ibi_ms, kind='cubic', fill_value="extrapolate")
         t_res = np.arange(times[0], times[-1], 0.25)
@@ -53,7 +73,6 @@ def calculate_lf_hf(ibi_ms):
         return np.nan
 
 def clean_ibi(ibi_ms):
-    # MODIFICA: Allargati i range (300-1600) e ridotta soglia minima (20)
     clean = ibi_ms[(ibi_ms >= 300) & (ibi_ms <= 1600)]
     return clean if len(clean) >= 20 else np.array([])
 
@@ -70,7 +89,6 @@ def extract_features_complete(subject_id, base_path):
     df_ibi = pd.read_csv(ibi_p, skiprows=1, names=['offset', 'ibi'])
     df_ibi['bpm_tmp'] = 60 / df_ibi['ibi']
     
-    # Sincronizzazione
     peak_time = df_ibi.loc[df_ibi['bpm_tmp'].rolling(50).mean().idxmax(), 'offset']
     sync_shift = peak_time - (tasks['Social_Stress'][0] + 150)
 
@@ -80,36 +98,43 @@ def extract_features_complete(subject_id, base_path):
 
     for label, (start, end) in tasks.items():
         s_f, e_f = start + sync_shift, end + sync_shift
-        
-        # DEBUG AGGIUNTO
         print(f"DEBUG: Soggetto {subject_id} - Task: {label} | Range: {s_f:.1f} - {e_f:.1f}")
         
         if (e_f - s_f) < window_size:
-            print(f"   -> SALTATO: {label} troppo breve per {subject_id}")
             continue
 
         for sw in np.arange(s_f, e_f - window_size, step): 
             win = df_ibi[(df_ibi['offset'] >= sw) & (df_ibi['offset'] < sw + window_size)]['ibi'].values * 1000
             win = clean_ibi(win)
             
-            # MODIFICA: Soglia >= 20
             if len(win) >= 20:
                 bpm = 60000 / np.mean(win)
                 rmssd = np.sqrt(np.mean(np.diff(win)**2))
                 sdnn = np.std(win)
                 lf_hf = calculate_lf_hf(win)
                 
+                # NUOVE FEATURE
+                pnn50 = calculate_pnn50(win)
+                sd1, sd2 = calculate_poincare_features(win)
+                
                 features.append({
-                    'Subject': subject_id, 'BPM': bpm, 'RMSSD': rmssd, 
-                    'SDNN': sdnn, 'LF_HF': lf_hf, 'Label': label
+                    'Subject': subject_id, 
+                    'BPM': bpm, 
+                    'RMSSD': rmssd, 
+                    'SDNN': sdnn, 
+                    'PNN50': pnn50,
+                    'SD1': sd1,
+                    'SD2': sd2,
+                    'LF_HF': lf_hf, 
+                    'Label': label
                 })
     
     df = pd.DataFrame(features)
     if df.empty or 'Baseline' not in df['Label'].values: return None
 
-    # Normalizzazione
-    df = df.dropna(subset=['BPM', 'RMSSD', 'SDNN'])
-    cols = ['BPM', 'RMSSD', 'SDNN', 'LF_HF']
+    # Normalizzazione (Rapporto rispetto alla Baseline)
+    df = df.dropna(subset=['BPM', 'RMSSD', 'SDNN', 'PNN50', 'SD1', 'SD2'])
+    cols = ['BPM', 'RMSSD', 'SDNN', 'PNN50', 'SD1', 'SD2', 'LF_HF']
     base_means = df[df['Label'] == 'Baseline'][cols].mean()
     
     if base_means.isnull().any(): return None
@@ -126,7 +151,7 @@ if __name__ == "__main__":
     subjects = ['S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S13', 'S14', 'S15', 'S16', 'S17']
     all_dfs = []
 
-    print("Inizio estrazione (Step 10s)...")
+    print("Inizio estrazione (Metriche: BPM, RMSSD, SDNN, PNN50, Poincaré SD1/SD2, LF/HF)...")
     for s in subjects:
         df_s = extract_features_complete(s, BASE_PATH)
         if df_s is not None:
@@ -135,8 +160,8 @@ if __name__ == "__main__":
 
     if all_dfs:
         final_df = pd.concat(all_dfs, ignore_index=True)
-        final_df.to_csv('wesad_complete_ratio.csv', index=False)
-        print("\nDataset salvato: 'wesad_complete_ratio.csv'")
+        final_df.to_csv('features_dataser.csv', index=False)
+        print("\nDataset salvato: 'features_dataset.csv'")
         print(f"Righe totali: {len(final_df)}")
         print(final_df.groupby('Label').size())
     else:
