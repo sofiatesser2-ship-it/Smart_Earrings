@@ -38,7 +38,7 @@ def load_and_prepare_data(file_path):
     y = df['Label']
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=SEED, stratify=y
+        X, y, test_size=0.2, random_state=SEED, shuffle=False
     )
 
     smote = SMOTE(random_state=SEED)
@@ -150,7 +150,7 @@ def train_xgboost(X_train, y_train):
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=10) 
+    study.optimize(objective, n_trials=100) 
     
     best_clf = XGBClassifier(**study.best_params, eval_metric='mlogloss', random_state=SEED, n_jobs=-1)
     best_clf.fit(X_train, y_train_encoded)
@@ -177,7 +177,7 @@ def train_lightgbm(X_train, y_train):
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=10)
+    study.optimize(objective, n_trials=100)
     
     best_clf = LGBMClassifier(**study.best_params, class_weight='balanced', random_state=SEED, n_jobs=-1, verbose=-1)
     best_clf.fit(X_train, y_train_encoded)
@@ -197,7 +197,7 @@ def train_svm(X_train, y_train):
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=10)
+    study.optimize(objective, n_trials=100)
     
     best_clf = Pipeline([
         ('scaler', StandardScaler()),
@@ -207,7 +207,7 @@ def train_svm(X_train, y_train):
     return best_clf
 
 def train_ebm(X_train, y_train):
-    clf = ExplainableBoostingClassifier(interactions=0, random_state=SEED, n_jobs=-1)
+    clf = ExplainableBoostingClassifier(interactions=10, random_state=SEED, n_jobs=-1)
     clf.fit(X_train, y_train)
     return clf
 
