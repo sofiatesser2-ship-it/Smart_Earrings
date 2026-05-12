@@ -1,54 +1,63 @@
 import pandas as pd
-import matplotlib.pyplot as plt
 import seaborn as sns
-import numpy as np
+import matplotlib.pyplot as plt
 
-# Configurazione stile
-plt.style.use('seaborn-v0_8-muted')
-sns.set_palette("husl")
+# 1. Carica il dataset (Nome file aggiornato)
+file_path = 'features_extraction.csv'
+df = pd.read_csv(file_path)
 
-def plot_comparison(file_path):
-    if not os.path.exists(file_path):
-        print("File non trovato!")
-        return
+# Definiamo la lista completa delle feature (incluse le nuove)
+features = ['BPM', 'RMSSD', 'SDNN', 'PNN50', 'SD1', 'SD2', 'LF_HF']
 
-    df = pd.read_csv(file_path)
+# Pulizia: rimuoviamo righe con valori mancanti per le feature selezionate
+df = df.dropna(subset=features)
+
+# --- 2. SEZIONE STATISTICA ---
+print("==========================================")
+print("--- ANALISI STATISTICA DEL DATASET ---")
+print("==========================================\n")
+
+print("1. Numero di campioni per ogni classe:")
+print(df['Label'].value_counts())
+print("\n" + "-"*30 + "\n")
+
+print("2. Medie delle features per ogni classe (Valori Normalizzati):")
+print(df.groupby('Label')[features].mean())
+print("\n" + "="*42 + "\n")
+
+
+# --- 3. GRAFICI ---
+sns.set_theme(style="whitegrid")
+
+# Creiamo una griglia 2x4 (per 7 feature, l'ultimo slot rimarrà vuoto o possiamo nasconderlo)
+fig, axes = plt.subplots(2, 4, figsize=(22, 12))
+fig.suptitle('Confronto delle Feature HRV (Densità e Media)', fontsize=22, fontweight='bold')
+
+# Appiattiamo l'array axes per ciclarlo facilmente
+axes_flat = axes.flatten()
+
+for i, feature in enumerate(features):
+    ax = axes_flat[i]
     
-    # Definiamo l'ordine delle classi per il grafico
-    order = ['Baseline', 'Social_Stress', 'Cognitive_Stress']
-    features = ['BPM', 'RMSSD', 'SDNN', 'LF_HF']
+    # Violin Plot (distribuzione)
+    sns.violinplot(x='Label', y=feature, data=df, ax=ax, 
+                   hue='Label', palette="viridis", legend=False, inner=None, alpha=0.7)
     
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    fig.suptitle('Confronto Fisiologico: Baseline vs Social Stress vs Cognitive Stress', fontsize=20)
-
-    for i, feat in enumerate(features):
-        ax = axes[i//2, i%2]
-        
-        # Violin plot per vedere la densità dei dati
-        sns.violinplot(x='Label', y=feat, data=df, order=order, ax=ax, inner="quartile")
-        
-        # Aggiungiamo un punto per la media per chiarezza
-        sns.pointplot(x='Label', y=feat, data=df, order=order, ax=ax, color='black', markers='D', errorbar=None)
-        
-        ax.set_title(f'Andamento di {feat}', fontsize=14, fontweight='bold')
-        ax.axhline(1.0, ls='--', color='red', alpha=0.3) # Linea di riferimento Baseline
-        ax.set_ylabel('Rapporto rispetto alla Baseline')
-        ax.set_xlabel('')
-
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.savefig('confronto_3_classi.png', dpi=300)
+    # Point Plot (media con pallino nero)
+    sns.pointplot(x='Label', y=feature, data=df, ax=ax, 
+                  color='black', markers='o', linestyles='', 
+                  errorbar=None, markersize=8)
     
-    # Calcolo differenze percentuali medie
-    print("\n--- ANALISI DELLE DIFFERENZE (Medie Normalizzate) ---")
-    summary = df.groupby('Label')[features].mean().reindex(order)
-    print(summary)
+    # Linea di riferimento Baseline (essendo dati normalizzati, la baseline è a 1.0)
+    ax.axhline(1.0, color='red', linestyle='--', alpha=0.6, linewidth=2)
     
-    # Calcolo variazione percentuale rispetto alla Baseline
-    diff = ((summary.loc[['Social_Stress', 'Cognitive_Stress']] - 1.0) * 100).round(2)
-    print("\nVariazione % rispetto alla Baseline:")
-    print(diff)
+    ax.set_title(f"{feature}", fontsize=16, fontweight='bold')
+    ax.set_xlabel('')
+    ax.set_ylabel('Valore Normalizzato', fontsize=12)
 
-if __name__ == "__main__":
-    import os
-    plot_comparison('wesad_complete_ratio.csv')
-    plt.show()
+# Nascondiamo l'ottavo subplot (vuoto)
+if len(features) < len(axes_flat):
+    axes_flat[-1].set_visible(False)
+
+plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+plt.show()

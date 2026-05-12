@@ -4,21 +4,21 @@ import os
 from scipy.signal import welch
 from scipy.interpolate import interp1d
 
-# --- 1. FUNZIONI DI PARSING E TECNICHE ---
+# --- 1. FUNZIONI DI CALCOLO METRICHE ---
 
 def calculate_poincare_features(ibi_ms):
-    """Calcola SD1 e SD2 dal Poincaré Plot."""
+    """Calcola i parametri SD1 e SD2 dal Poincaré Plot."""
     if len(ibi_ms) < 2:
         return np.nan, np.nan
     diff_ibi = np.diff(ibi_ms)
-    # SD1 rappresenta la variabilità a breve termine (correlata a RMSSD)
+    # SD1: variabilità a breve termine
     sd1 = np.sqrt(np.std(diff_ibi, ddof=1)**2 * 0.5)
-    # SD2 rappresenta la variabilità a lungo termine
+    # SD2: variabilità a lungo termine
     sd2 = np.sqrt(2 * np.std(ibi_ms, ddof=1)**2 - 0.5 * np.std(diff_ibi, ddof=1)**2)
     return sd1, sd2
 
 def calculate_pnn50(ibi_ms):
-    """Calcola la percentuale di intervalli IBI consecutivi che differiscono per più di 50ms."""
+    """Calcola la percentuale di intervalli con differenza > 50ms."""
     if len(ibi_ms) < 2:
         return np.nan
     diff_ibi = np.abs(np.diff(ibi_ms))
@@ -54,7 +54,7 @@ def get_subject_times_split(quest_path):
 
 def calculate_lf_hf(ibi_ms):
     try:
-        if len(ibi_ms) < 20: return np.nan 
+        if len(ibi_ms) < 20: return np.nan
         times = np.cumsum(ibi_ms) / 1000.0
         f_interp = interp1d(times, ibi_ms, kind='cubic', fill_value="extrapolate")
         t_res = np.arange(times[0], times[-1], 0.25)
@@ -76,7 +76,8 @@ def clean_ibi(ibi_ms):
     clean = ibi_ms[(ibi_ms >= 300) & (ibi_ms <= 1600)]
     return clean if len(clean) >= 20 else np.array([])
 
-# --- 2. ESTRAZIONE ---
+# --- 2. ESTRAZIONE CARATTERISTICHE ---
+
 def extract_features_complete(subject_id, base_path):
     sub_folder = os.path.join(base_path, subject_id)
     ibi_p = os.path.join(sub_folder, f"{subject_id}_E4_Data", "IBI.csv")
@@ -98,7 +99,6 @@ def extract_features_complete(subject_id, base_path):
 
     for label, (start, end) in tasks.items():
         s_f, e_f = start + sync_shift, end + sync_shift
-        print(f"DEBUG: Soggetto {subject_id} - Task: {label} | Range: {s_f:.1f} - {e_f:.1f}")
         
         if (e_f - s_f) < window_size:
             continue
@@ -112,21 +112,14 @@ def extract_features_complete(subject_id, base_path):
                 rmssd = np.sqrt(np.mean(np.diff(win)**2))
                 sdnn = np.std(win)
                 lf_hf = calculate_lf_hf(win)
-                
-                # NUOVE FEATURE
                 pnn50 = calculate_pnn50(win)
                 sd1, sd2 = calculate_poincare_features(win)
                 
                 features.append({
                     'Subject': subject_id, 
-                    'BPM': bpm, 
-                    'RMSSD': rmssd, 
-                    'SDNN': sdnn, 
-                    'PNN50': pnn50,
-                    'SD1': sd1,
-                    'SD2': sd2,
-                    'LF_HF': lf_hf, 
-                    'Label': label
+                    'BPM': bpm, 'RMSSD': rmssd, 'SDNN': sdnn, 
+                    'PNN50': pnn50, 'SD1': sd1, 'SD2': sd2,
+                    'LF_HF': lf_hf, 'Label': label
                 })
     
     df = pd.DataFrame(features)
@@ -145,24 +138,27 @@ def extract_features_complete(subject_id, base_path):
             
     return df.dropna()
 
-# --- 3. MAIN ---
+# --- 3. ESECUZIONE ---
+
 if __name__ == "__main__":
     BASE_PATH = r"C:\Users\arima\Desktop\Progetto\WESAD"
     subjects = ['S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S13', 'S14', 'S15', 'S16', 'S17']
     all_dfs = []
 
-    print("Inizio estrazione (Metriche: BPM, RMSSD, SDNN, PNN50, Poincaré SD1/SD2, LF/HF)...")
+    print("Inizio estrazione delle feature...")
     for s in subjects:
         df_s = extract_features_complete(s, BASE_PATH)
         if df_s is not None:
             all_dfs.append(df_s)
-            print(f"Soggetto {s} estratto correttamente.")
+            print(f"Soggetto {s} completato.")
 
     if all_dfs:
         final_df = pd.concat(all_dfs, ignore_index=True)
-        final_df.to_csv('features_dataser.csv', index=False)
-        print("\nDataset salvato: 'features_dataset.csv'")
-        print(f"Righe totali: {len(final_df)}")
+        # Nome file aggiornato come richiesto
+        final_df.to_csv('features_extraction.csv', index=False)
+        print("\nDataset salvato con successo: 'features_extraction.csv'")
+        print(f"Record totali: {len(final_df)}")
+        print("\nDistribuzione per Label:")
         print(final_df.groupby('Label').size())
     else:
-        print("Nessun dato estratto.")
+        print("Errore: Nessun dato estratto.")
