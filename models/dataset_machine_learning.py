@@ -216,7 +216,7 @@ if __name__ == "__main__":
     evaluate_model(ebm, X_test, y_test, "EBM")
 
 # ==========================================
-# CONFRONTO FINALE (Aggiunto alla fine)
+# CONFRONTO FINALE
 # ==========================================
 print("\n" + "="*50)
 print("SINTESI FINALE DELLE PERFORMANCE")
