@@ -104,9 +104,40 @@ def evaluate_model(clf, X_test, y_test, model_name="Modello", label_encoder=None
 # ==========================================
 
 def train_random_forest(X_train, y_train, weights_dict):
-    clf = RandomForestClassifier(n_estimators=100, random_state=SEED, class_weight=weights_dict)
-    clf.fit(X_train, y_train)
-    return clf
+    print("\n[Optuna] Inizio ottimizzazione Random Forest...")
+    
+    def objective(trial):
+        # Definiamo lo spazio degli iperparametri
+        param = {
+            'n_estimators': trial.suggest_int('n_estimators', 50, 300),
+            'max_depth': trial.suggest_int('max_depth', 3, 20),
+            'min_samples_split': trial.suggest_int('min_samples_split', 2, 10),
+            'criterion': trial.suggest_categorical('criterion', ['gini', 'entropy']),
+            'class_weight': weights_dict,
+            'random_state': SEED,
+            'n_jobs': -1
+        }
+        
+        clf = RandomForestClassifier(**param)
+        
+        # Utilizziamo StratifiedKFold per mantenere la distribuzione delle classi
+        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
+        
+        # Ottimizziamo per F1-Macro per gestire meglio eventuali sbilanciamenti
+        score = cross_val_score(clf, X_train, y_train, cv=cv, scoring='f1_macro').mean()
+        return score
+
+    # Eseguiamo lo studio
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=50) 
+
+    print(f"Migliori parametri RF: {study.best_params}")
+    
+    # Addestriamo il modello finale con i migliori parametri
+    best_clf = RandomForestClassifier(**study.best_params, class_weight=weights_dict, random_state=SEED)
+    best_clf.fit(X_train, y_train)
+    
+    return best_clf
 
 # 2. XGBOOST con GroupKFold
 def train_xgboost(X_train, y_train, groups_train, weights_dict):
