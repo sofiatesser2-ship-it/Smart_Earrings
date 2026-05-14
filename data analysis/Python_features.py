@@ -18,19 +18,28 @@ def analizza_da_csv(path, colonna, fs):
         return f"Errore nel caricamento: {e}"
 
     # 2. Peak Detection
-    peaks, _ = find_peaks(signal, distance=int(fs * 0.5), height=np.mean(signal))
+    # Regoliamo la distanza minima tra picchi (es. 0.4s = max 150 BPM)
+    peaks, _ = find_peaks(signal, distance=int(fs * 0.4), height=np.mean(signal))
+    n_battiti = len(peaks)
 
     # 3. Calcolo Intervalli RR (in millisecondi)
     rr_intervals = np.diff(peaks) * (1000.0 / fs)
 
-    # 4. Pulizia Fisiologica
+    # 4. Pulizia Fisiologica (rimozione outlier per HRV)
     rr_clean = rr_intervals[(rr_intervals >= 400) & (rr_intervals <= 1500)]
 
     if len(rr_clean) < 10: 
-        return "Errore: segnale troppo corto per analisi frequenziale."
+        return "Errore: segnale troppo corto o troppo sporco per analisi."
 
-    # 5. Calcolo Metriche Temporali
-    bpm_medio = 60000.0 / np.mean(rr_clean)
+    # 5. CALCOLO BPM (Logica Temporale Reale)
+    # Calcoliamo la durata basandoci sui campioni tra il primo e l'ultimo picco
+    durata_secondi = (peaks[-1] - peaks[0]) / fs
+    durata_minuti = durata_secondi / 60
+    
+    # Il BPM corretto si calcola come (numero intervalli) / minuti
+    bpm_medio = (n_battiti - 1) / durata_minuti
+
+    # 6. Calcolo Metriche Temporali (HRV)
     sdnn = np.std(rr_clean, ddof=1)
     diff_rr = np.diff(rr_clean)
     rmssd = np.sqrt(np.mean(np.square(diff_rr)))
@@ -44,7 +53,7 @@ def analizza_da_csv(path, colonna, fs):
     sd1 = np.sqrt(0.5 * sd_diff_rr**2)
     sd2 = np.sqrt(2 * sdnn**2 - 0.5 * sd_diff_rr**2)
 
-    # 6. ANALISI FREQUENZIALE
+    # 7. ANALISI FREQUENZIALE
     x = np.cumsum(rr_clean) / 1000.0
     x = x - x[0] 
     
@@ -63,13 +72,16 @@ def analizza_da_csv(path, colonna, fs):
     hf_power = np.trapezoid(psd[hf_mask], f[hf_mask])
     lf_hf_ratio = lf_power / hf_power if hf_power != 0 else 0
 
-    # 7. Risultati a schermo
+    # 8. Risultati a schermo
     print("="*40)
     print(f"REPORT HRV COMPLETO - FILE: {path}")
     print("="*40)
-    print(f"BPM Medio:       {bpm_medio:.2f}")
-    print(f"SDNN:            {sdnn:.2f} ms")
-    print(f"RMSSD:           {rmssd:.2f} ms")
+    print(f"Battiti Totali:  {n_battiti}")
+    print(f"Durata Analisi:  {durata_secondi:.1f} secondi ({durata_minuti:.2f} min)")
+    print(f"BPM MEDIO:       {bpm_medio:.2f}")
+    print("-" * 40)
+    print(f"SDNN (Variab.):  {sdnn:.2f} ms")
+    print(f"RMSSD (Vago):    {rmssd:.2f} ms")
     print(f"pNN50:           {pnn50:.2f} %")
     print("-" * 40)
     print(f"LF Power:        {lf_power:.2f} ms²")
@@ -78,51 +90,42 @@ def analizza_da_csv(path, colonna, fs):
     print("-" * 40)
     print(f"Poincaré SD1:    {sd1:.2f} ms")
     print(f"Poincaré SD2:    {sd2:.2f} ms")
-    print(f"Battiti Totali:  {len(peaks)}")
     print("="*40)
 
-    # --- 8. PULIZIA TOTALE ---
-    plt.close('all') # Chiude ogni finestra rimasta appesa
+    # --- 9. GRAFICI ---
+    plt.close('all')
 
-    # --- 9. FINESTRA 1: Segnale e Spettro ---
-    fig1 = plt.figure(figsize=(10, 8))
+    # FINESTRA 1: Segnale e Spettro
+    fig1 = plt.figure(figsize=(12, 8))
     ax1 = fig1.add_subplot(2, 1, 1)
-    ax1.plot(signal, color='blue', alpha=0.6, label='PPG')
-    ax1.plot(peaks, signal[peaks], "ro", label='Battiti')
-    ax1.set_title("Rilevazione Battiti")
+    ax1.plot(signal, color='blue', alpha=0.5, label='Segnale PPG')
+    ax1.scatter(peaks, signal[peaks], color='red', s=20, label='Picchi Rilevati')
+    ax1.set_title(f"Rilevazione Picchi (Totale: {n_battiti})")
+    ax1.set_xlabel("Campioni")
     ax1.legend()
 
     ax2 = fig1.add_subplot(2, 1, 2)
-    ax2.fill_between(f, psd, where=lf_mask, color='orange', alpha=0.5, label='LF')
-    ax2.fill_between(f, psd, where=hf_mask, color='green', alpha=0.5, label='HF')
-    ax2.set_title(f"Spettro (LF/HF: {lf_hf_ratio:.2f})")
+    ax2.fill_between(f, psd, where=lf_mask, color='orange', alpha=0.5, label='LF (Simpatico)')
+    ax2.fill_between(f, psd, where=hf_mask, color='green', alpha=0.5, label='HF (Vagale)')
+    ax2.set_title(f"Analisi Frequenziale (LF/HF: {lf_hf_ratio:.2f})")
     ax2.set_xlim(0, 0.5)
+    ax2.set_xlabel("Frequenza [Hz]")
     ax2.legend()
     plt.tight_layout()
 
-    # --- 10. FINESTRA 2: Poincaré Plot (FINALMENTE DA SOLO) ---
-    fig2 = plt.figure(figsize=(8, 8)) # Forza la finestra quadrata
+    # FINESTRA 2: Poincaré Plot
+    fig2 = plt.figure(figsize=(7, 7))
     ax3 = fig2.add_subplot(1, 1, 1)
-    
-    rr_n = rr_clean[:-1]
-    rr_n_plus_1 = rr_clean[1:]
-    
-    ax3.scatter(rr_n, rr_n_plus_1, color='purple', alpha=0.6, s=30)
-    
-    # QUESTO È IL SEGRETO:
+    ax3.scatter(rr_clean[:-1], rr_clean[1:], color='purple', alpha=0.6, s=30)
     ax3.set_aspect('equal', adjustable='box') 
-    
-    # Centriamo il grafico sui dati per non vederlo "lontano"
-    lims = [min(rr_clean)-20, max(rr_clean)+20]
-    ax3.set_xlim(lims)
-    ax3.set_ylim(lims)
-    ax3.plot(lims, lims, 'k--', alpha=0.3) # Diagonale
-    
-    ax3.set_title(f"Poincaré Plot (SD1: {sd1:.2f}, SD2: {sd2:.2f})")
-    ax3.set_xlabel("RR_n [ms]")
-    ax3.set_ylabel("RR_n+1 [ms]")
+    lims = [0, max(rr_clean)+20]
+    ax3.set_xlim(lims); ax3.set_ylim(lims)
+    ax3.plot(lims, lims, 'k--', alpha=0.3)
+    ax3.set_title("Poincaré Plot")
+    ax3.set_xlabel("RR_n [ms]"); ax3.set_ylabel("RR_n+1 [ms]")
     ax3.grid(True, linestyle=':', alpha=0.6)
 
     plt.show()
+
 # Esecuzione
-risultato = analizza_da_csv(FILE_PATH, COLONNA_SEGNALE, FS)
+analizza_da_csv(FILE_PATH, COLONNA_SEGNALE, FS)

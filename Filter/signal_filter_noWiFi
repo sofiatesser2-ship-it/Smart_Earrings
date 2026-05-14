@@ -7,7 +7,7 @@ from scipy.signal import butter, filtfilt, iirnotch, medfilt
 
 
 # --- CONFIGURAZIONE ---
-PORTA_SERIALE = 'COM5'
+PORTA_SERIALE = 'COM10'
 BAUD_RATE = 115200
 FILE_NAME = 'ppg_200Hz_filtrato.csv'
 FS = 200.0  
