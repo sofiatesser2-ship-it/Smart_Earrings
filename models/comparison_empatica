@@ -132,9 +132,6 @@ def analizza_metrica(colonna_target):
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.legend(loc="upper right", frameon=True, shadow=True)
 
-    for i in range(len(x)):
-        plt.annotate(f"#{i+1}", (mean_m[i], diff_m[i]), xytext=(6, 4), textcoords="offset points", fontsize=9, fontweight="semibold")
-
     plt.tight_layout()
     nome_file_ba = os.path.join(cartella_grafici_ba, f"bland_altman_{colonna_target}.png")
     plt.savefig(nome_file_ba, dpi=150)
