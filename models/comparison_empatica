@@ -1,73 +1,160 @@
-import pandas as pd
+import os
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-from hrvanalysis import get_time_domain_features, get_frequency_domain_features
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from scipy.stats import wilcoxon, shapiro
+import scipy.stats as stats
+from scipy.signal import find_peaks, welch
+from scipy.interpolate import interp1d
 import pingouin as pg
 
-# 1. FUNZIONE PER CALCOLO PARAMETRI HRV (RR, BPM, RMSSD, SDNN, LF/HF)
-def calculate_hrv_metrics(rr_intervals):
-    # rr_intervals deve essere in millisecondi
-    time_domain = get_time_domain_features(rr_intervals)
-    freq_domain = get_frequency_domain_features(rr_intervals)
-    
-    return {
-        'rr_mean': np.mean(rr_intervals),
-        'bpm_mean': time_domain['mean_hr'],
-        'rmssd': time_domain['rmssd'],
-        'sdnn': time_domain['sdnn'],
-        'lf_hf': freq_domain['lf_hf_ratio']
-    }
+# =========================================================================
+# 1. CONFIGURAZIONE PERCORSI CARTELLE (CORRETTA)
+# =========================================================================
+script_dir = os.path.dirname(os.path.abspath(__file__))
 
-# 2. CARICAMENTO DATI
-# Supponiamo che il CSV di Embrace Plus contenga i picchi sistolici o intervalli IBI
-# Nota: Embrace Plus fornisce IBI.csv o file .avro convertibili
-df_embrace = pd.read_csv('embrace_plus_ibi.csv') 
-df_smart_earrings = pd.read_csv('smart_earrings_metrics.csv')
+# Cartella contenente i file generati dall'Empatica (intervallo_1.csv, ecc.)
+DIR_EMPATICA = os.path.abspath(os.path.join(script_dir, "..", "data", "intervalli_splittati"))
 
-# 3. ANALISI STATISTICA E VALIDAZIONE
-def validate_metrics(gold_standard, test_device, metric_name):
-    print(f"--- Validazione per: {metric_name} ---")
-    
-    # RMSE, MAE, MAPE, R^2
-    rmse = np.sqrt(mean_squared_error(gold_standard, test_device))
-    mae = mean_absolute_error(gold_standard, test_device)
-    mape = np.mean(np.abs((gold_standard - test_device) / gold_standard)) * 100
-    r2 = r2_score(gold_standard, test_device)
-    
-    # Test di normalità per scegliere Wilcoxon
-    _, p_norm = shapiro(gold_standard - test_device)
-    stat, p_wilcoxon = wilcoxon(gold_standard, test_device)
-    
-    # ICC (Intraclass Correlation Coefficient)
-    data_icc = pd.DataFrame({
-        'id': list(range(len(gold_standard))) * 2,
-        'device': ['gold']*len(gold_standard) + ['test']*len(test_device),
-        'score': np.concatenate([gold_standard, test_device])
-    })
-    icc = pg.intraclass_corr(data=data_icc, targets='id', raters='device', ratings='score')
-    
-    print(f"RMSE: {rmse:.2f} | MAE: {mae:.2f} | MAPE: {mape:.2f}% | R2: {r2:.2f}")
-    print(f"ICC (Absolute Agreement): {icc.iloc[2]['ICC']:.3f}") # ICC3: mixed effect
-    print(f"Wilcoxon p-value: {p_wilcoxon:.4f}")
-    
-    # BLAND-ALTMAN PLOT
-    mean_val = (gold_standard + test_device) / 2
-    diff = test_device - gold_standard
-    md = np.mean(diff)
-    sd = np.std(diff, axis=0)
+# CORREZIONE: Punta direttamente alla cartella principale "Smart_Earrings" 
+# salendo di un livello rispetto alla cartella "models" dove si trova lo script
+DIR_ALTRO_DISP = os.path.abspath(os.path.join(script_dir, ".."))
 
-    plt.figure(figsize=(8, 5))
-    plt.scatter(mean_val, diff, alpha=0.5)
-    plt.axhline(md, color='red', linestyle='--', label=f'Bias: {md:.2f}')
-    plt.axhline(md + 1.96*sd, color='gray', linestyle='--')
-    plt.axhline(md - 1.96*sd, color='gray', linestyle='--')
-    plt.title(f'Bland-Altman Plot: {metric_name}')
-    plt.xlabel('Media dei due dispositivi')
-    plt.ylabel('Differenza (Test - Gold)')
-    plt.legend()
-    plt.show()
+# Parametri Hardware dei due sensori
+FS_EMPATICA = 64
+FS_ALTRO = 200
+COLONNA_EMPATICA = 'bvp'
+COLONNA_ALTRO = 'Final_Result'
 
-# Esempio d'uso (da adattare ai tuoi array di dati)
-# validate_metrics(df_embrace['rmssd'], df_smart_earrings['rmssd'], 'RMSSD')
+# =========================================================================
+# 2. FUNZIONE CORE DI ESTRAZIONE METRICHE (La tua logica matematica valida)
+# =========================================================================
+def estrai_metriche_hrv(file_path, colonna_segnale, fs):
+    try:
+        df = pd.read_csv(file_path)
+        signal = df[colonna_segnale].values
+    except:
+        return None
+
+    # Peak detection adattata alla frequenza dello specifico hardware
+    min_dist = int(fs * 0.45) if fs == 64 else int(fs * 0.4)
+    prom = np.std(signal) * 0.4 if fs == 64 else None
+    height = np.mean(signal) if fs == 200 else None
+    
+    peaks, _ = find_peaks(signal, distance=min_dist, prominence=prom, height=height)
+    n_battiti = len(peaks)
+    if n_battiti < 15: return None
+
+    rr_intervals = np.diff(peaks) * (1000.0 / fs)
+    rr_clean = rr_intervals[(rr_intervals >= 400) & (rr_intervals <= 1500)]
+    if len(rr_clean) < 10: return None
+
+    # BPM Medio
+    durata_minuti = ((peaks[-1] - peaks[0]) / fs) / 60
+    bpm_medio = (n_battiti - 1) / durata_minuti
+
+    # Temporali
+    sdnn = np.std(rr_clean, ddof=1)
+    diff_rr = np.diff(rr_clean)
+    rmssd = np.sqrt(np.mean(np.square(diff_rr)))
+
+    return {"BPM": bpm_medio, "SDNN": sdnn, "RMSSD": rmssd}
+
+# =========================================================================
+# 3. ELABORAZIONE MASSIVA DI TUTTI I 16 INTERVALLI
+# =========================================================================
+dati_confronto = []
+
+print("Elaborazione e appaiamento degli intervalli in corso...")
+for i in range(1, 17):
+    file_emp = os.path.join(DIR_EMPATICA, f"intervallo_{i}.csv")
+    file_alt = os.path.join(DIR_ALTRO_DISP, f"140526.{i}.csv")
+    
+    res_emp = estrai_metriche_hrv(file_emp, COLONNA_EMPATICA, FS_EMPATICA)
+    res_alt = estrai_metriche_hrv(file_alt, COLONNA_ALTRO, FS_ALTRO)
+    
+    if res_emp and res_alt:
+        dati_confronto.append({
+            "Intervallo": i,
+            "BPM_Emp": res_emp["BPM"], "BPM_Alt": res_alt["BPM"],
+            "SDNN_Emp": res_emp["SDNN"], "SDNN_Alt": res_alt["SDNN"],
+            "RMSSD_Emp": res_emp["RMSSD"], "RMSSD_Alt": res_alt["RMSSD"]
+        })
+        print(f" -> Intervallo {i}: Accoppiato con successo.")
+    else:
+        print(f" -> Intervallo {i}: Mancante o scartato per artefatti in uno dei due dispositivi.")
+
+df_stats = pd.DataFrame(dati_confronto)
+
+if df_stats.empty:
+    print("\n[ERRORE] Nessun intervallo accoppiato. Controlla i percorsi delle cartelle nello script.")
+    exit()
+
+# =========================================================================
+# 4. CALCOLO METRICHE STATISTICHE (MAE, RMSE, MAPE, ICC, Wilcoxon) per BPM
+# =========================================================================
+print("\n" + "="*70)
+print("             REPORT STATISTICO DI VALIDAZIONE STRUMENTALE            ")
+print("="*70)
+
+for metrica in ["BPM", "SDNN", "RMSSD"]:
+    y_true = df_stats[f"{metrica}_Alt"].values  # Dispositivo di riferimento
+    y_pred = df_stats[f"{metrica}_Emp"].values  # I tuoi Smart Earrings / Empatica
+    
+    # Errori Geometrici
+    mae = np.mean(np.abs(y_true - y_pred))
+    rmse = np.sqrt(np.mean((y_true - y_pred)**2))
+    mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
+    
+    # Wilcoxon Signed-Rank Test (Significatività delle differenze)
+    stat, p_val = stats.wilcoxon(y_true, y_pred)
+    
+    # Intraclass Correlation Coefficient (ICC tipo ICC3: consistenza tra misure fisse)
+    # Prepariamo il df nel formato richiesto da pingouin (long format)
+    df_icc_long = pd.melt(df_stats[["Intervallo", f"{metrica}_Alt", f"{metrica}_Emp"]], 
+                          id_vars=["Intervallo"], var_name="Dispositivo", value_name="Valore")
+    icc_res = pg.intraclass_corr(data=df_icc_long, targets="Intervallo", raters="Dispositivo", ratings="Valore")
+    # Prendiamo l'ICC fisso a due vie (misure singole, ICC3)
+    icc_val = icc_res.set_index("Type").loc("Accordo speculare") if "Accordo speculare" in icc_res["Type"].values else icc_res.iloc[2]["ICC"]
+    if isinstance(icc_val, pd.Series) or hasattr(icc_val, 'values'):
+        icc_val = icc_res.iloc[2]["ICC"] # Fallback all'indice standard del Single Fixed Raters
+
+    print(f"\nANALISI METRICA: {metrica}")
+    print("-" * 40)
+    print(f"  MAE (Errore Medio Assoluto):  {mae:.2f}")
+    print(f"  RMSE (Radice Errore Quadro):  {rmse:.2f}")
+    print(f"  MAPE (Errore Perc. Medio):    {mape:.2f} %")
+    print(f"  ICC (Coerenza Intraclasse):   {icc_val:.3f} " + 
+          ("(Eccellente >0.90)" if icc_val > 0.90 else "(Buono >0.75)" if icc_val > 0.75 else "(Moderato)"))
+    print(f"  Wilcoxon p-value:             {p_val:.4f} " + 
+          ("(Nessuna diff. significativa, OTTIMO)" if p_val > 0.05 else "(Presenza di bias sistematico)"))
+
+# =========================================================================
+# 5. GRAFICO DI BLAND-ALTMAN PER I BPM
+# =========================================================================
+bpm_alt = df_stats["BPM_Alt"].values
+bpm_emp = df_stats["BPM_Emp"].values
+
+medie = (bpm_alt + bpm_emp) / 2.0
+differenze = bpm_emp - bpm_alt  # Empatica - Riferimento
+bias = np.mean(differenze)
+sd_diff = np.std(differenze, ddof=1)
+limite_superiore = bias + 1.96 * sd_diff
+limite_inferiore = bias - 1.96 * sd_diff
+
+plt.figure(figsize=(10, 6))
+plt.scatter(medie, differenze, color="crimson", edgecolors="k", s=60, zorder=3, label="Intervalli validati")
+plt.axhline(bias, color="blue", linestyle="-", linewidth=2, label=f"Bias Medio: {bias:.2f} BPM")
+plt.axhline(limite_superiore, color="red", linestyle="--", linewidth=1.5, label=f"+1.96 SD: {limite_superiore:.2f}")
+plt.axhline(limite_inferiore, color="red", linestyle="--", linewidth=1.5, label=f"-1.96 SD: {limite_inferiore:.2f}")
+plt.axhline(0, color="gray", linestyle=":", alpha=0.7)
+
+plt.title("Grafico di Bland-Altman - Validazione Frequenza Cardiaca (BPM)", fontsize=13, fontweight="bold")
+plt.xlabel("Media delle misure dei due dispositivi [BPM]", fontsize=11)
+plt.ylabel("Differenza tra le misure (Smart Earrings - Riferimento) [BPM]", fontsize=11)
+plt.grid(True, linestyle=":", alpha=0.6)
+plt.legend(loc="upper right", frameon=True, shadow=True)
+
+# Aggiusta dinamicamente i limiti per la leggibilità del testo
+plt.ylim(bias - 3 * sd_diff, bias + 3 * sd_diff)
+plt.tight_layout()
+plt.show()

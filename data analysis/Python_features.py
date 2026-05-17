@@ -5,7 +5,7 @@ from scipy.signal import find_peaks, welch
 from scipy.interpolate import interp1d
 
 # IMPOSTAZIONI
-FILE_PATH = '140526.4.csv'
+FILE_PATH = '140526.10.csv'
 COLONNA_SEGNALE = 'Final_Result'
 FS = 200
 
