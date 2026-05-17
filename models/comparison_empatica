@@ -127,8 +127,8 @@ def analizza_metrica(colonna_target):
     plt.axhline(loa_upper, color="blue", linestyle=":", linewidth=1.5, label=f"+1.96 SD (Upper LoA): {loa_upper:.2f}")
     plt.axhline(loa_lower, color="blue", linestyle=":", linewidth=1.5, label=f"-1.96 SD (Lower LoA): {loa_lower:.2f}")
     plt.title(f"Bland-Altman Plot - {colonna_target}", fontsize=13, fontweight="bold")
-    plt.xlabel("Media delle misure dei due dispositivi", fontsize=11)
-    plt.ylabel("Differenza (Totale - Empatica)", fontsize=11)
+    plt.xlabel("Mean of the two measurements", fontsize=11)
+    plt.ylabel("Difference (Smart Earrings - Empatica)", fontsize=11)
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.legend(loc="upper right", frameon=True, shadow=True)
 
@@ -142,14 +142,14 @@ def analizza_metrica(colonna_target):
 
     # --- 3f. GRAFICO DI CORRELAZIONE (Scatter Plot SENZA Trendline) ---
     plt.figure(figsize=(7.5, 6))
-    plt.scatter(x, y, color="purple", alpha=0.7, edgecolors="k", s=90, label="Dati Appaiati")
+    plt.scatter(x, y, color="purple", alpha=0.7, edgecolors="k", s=90, label="Data")
     
     # Linea di identità perfetta (X = Y) a scopo di confronto visivo
     lims = [np.min([plt.xlim(), plt.ylim()]), np.max([plt.xlim(), plt.ylim()])]
-    plt.plot(lims, lims, color="gray", linestyle="--", alpha=0.7, label="Identità Perfetta (x=y)")
+    plt.plot(lims, lims, color="gray", linestyle="--", alpha=0.7, label="Identity Line (x=y)")
     
-    plt.title(f"Scatter Plot & Correlazione - {colonna_target}", fontsize=13, fontweight="bold")
-    plt.xlabel("Totale (Smart Earrings)", fontsize=11)
+    plt.title(f"Scatter Plot & Correlation - {colonna_target}", fontsize=13, fontweight="bold")
+    plt.xlabel("Smart Earrings", fontsize=11)
     plt.ylabel("Empatica", fontsize=11)
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.legend(loc="upper left", frameon=True)
