@@ -36,7 +36,7 @@ os.makedirs(cartella_grafici_corr, exist_ok=True)
 # =====================================================================
 # 2. SELEZIONE DELLE METRICHE (SOLO BPM, SDNN, RMSSD)
 # =====================================================================
-nomi_target = ['BPM_Medio', 'SDNN_ms', 'RMSSD_ms']
+nomi_target = ['BPM Mean', 'SDNN', 'RMSSD']
 
 # Filtra tenendo SOLO le colonne presenti in entrambi i file CHE SONO ANCHE nella lista nomi_target
 metriche_comuni = [
@@ -139,7 +139,7 @@ def analizza_metrica(colonna_target):
     plt.axhline(md, color="red", linestyle="--", linewidth=1.5, label=f"Bias: {md:.2f}")
     plt.axhline(loa_upper, color="blue", linestyle=":", linewidth=1.5, label=f"+1.96 SD (Upper LoA): {loa_upper:.2f}")
     plt.axhline(loa_lower, color="blue", linestyle=":", linewidth=1.5, label=f"-1.96 SD (Lower LoA): {loa_lower:.2f}")
-    plt.title(f"Bland-Altman Plot - {colonna_target} (Garmin)", fontsize=13, fontweight="bold")
+    plt.title(f"Bland-Altman Plot - {colonna_target}", fontsize=13, fontweight="bold")
     plt.xlabel("Mean of the two measurements", fontsize=11)
     plt.ylabel("Difference (Smart Earrings - Garmin)", fontsize=11)
     plt.grid(True, linestyle="--", alpha=0.5)
@@ -161,7 +161,7 @@ def analizza_metrica(colonna_target):
     lims = [np.min([plt.xlim(), plt.ylim()]), np.max([plt.xlim(), plt.ylim()])]
     plt.plot(lims, lims, color="gray", linestyle="--", alpha=0.7, label="Identity Line (x=y)")
     
-    plt.title(f"Scatter Plot & Correlation - {colonna_target} (Garmin)", fontsize=13, fontweight="bold")
+    plt.title(f"Scatter Plot & Correlation - {colonna_target}", fontsize=13, fontweight="bold")
     plt.xlabel("Smart Earrings", fontsize=11)
     plt.ylabel("Garmin", fontsize=11)
     plt.grid(True, linestyle="--", alpha=0.5)

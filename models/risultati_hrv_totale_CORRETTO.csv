@@ -1,4 +1,4 @@
-File,Battiti_Totali,Durata_Secondi,BPM_Medio,SDNN_ms,RMSSD_ms,pNN50_percent,LF_Power_ms2,HF_Power_ms2,Rapporto_LF_HF,Poincare_SD1_ms,Poincare_SD2_ms
+File,Battiti_Totali,Durata_Secondi,BPM Mean,SDNN,RMSSD,pNN50,LF_Power_ms2,HF_Power_ms2,LF_HF ratio,Poincare SD1,Poincare SD2
 140526.2.csv,152,116.8,77.6,44.76,40.82,22.0,761.88,859.87,0.89,28.96,56.28
 140526.3.csv,166,116.2,85.23,19.45,13.65,0.0,92.73,105.8,0.88,9.68,25.74
 140526.5.csv,206,118.6,103.74,35.37,22.92,3.43,488.38,361.39,1.35,16.23,47.32
