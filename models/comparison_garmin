@@ -140,10 +140,10 @@ def analizza_metrica(colonna_target):
     plt.axhline(loa_upper, color="blue", linestyle=":", linewidth=1.5, label=f"+1.96 SD (Upper LoA): {loa_upper:.2f}")
     plt.axhline(loa_lower, color="blue", linestyle=":", linewidth=1.5, label=f"-1.96 SD (Lower LoA): {loa_lower:.2f}")
     plt.title(f"Bland-Altman Plot - {colonna_target} (Garmin)", fontsize=13, fontweight="bold")
-    plt.xlabel("Media delle misure dei due dispositivi", fontsize=11)
-    plt.ylabel("Differenza (Totale - Garmin)", fontsize=11)
+    plt.xlabel("Mean of the two measurements", fontsize=11)
+    plt.ylabel("Difference (Smart Earrings - Garmin)", fontsize=11)
     plt.grid(True, linestyle="--", alpha=0.5)
-    plt.legend(loc="upper right", frameon=True, shadow=True)
+    plt.legend(loc="upper left", frameon=True, shadow=True)
 
     for i in range(len(x)):
         plt.annotate(f"#{i+1}", (mean_m[i], diff_m[i]), xytext=(6, 4), textcoords="offset points", fontsize=9, fontweight="semibold")
@@ -155,22 +155,22 @@ def analizza_metrica(colonna_target):
 
     # --- 3f. GRAFICO DI CORRELAZIONE (Scatter Plot SENZA Trendline) ---
     plt.figure(figsize=(7.5, 6))
-    plt.scatter(x, y, color="purple", alpha=0.7, edgecolors="k", s=90, label="Dati Appaiati")
+    plt.scatter(x, y, color="purple", alpha=0.7, edgecolors="k", s=90, label="Data")
     
     # Linea di identità perfetta (X = Y) a scopo di confronto visivo
     lims = [np.min([plt.xlim(), plt.ylim()]), np.max([plt.xlim(), plt.ylim()])]
-    plt.plot(lims, lims, color="gray", linestyle="--", alpha=0.7, label="Identità Perfetta (x=y)")
+    plt.plot(lims, lims, color="gray", linestyle="--", alpha=0.7, label="Identity Line (x=y)")
     
-    plt.title(f"Scatter Plot & Correlazione - {colonna_target} (Garmin)", fontsize=13, fontweight="bold")
-    plt.xlabel("Totale (Smart Earrings)", fontsize=11)
+    plt.title(f"Scatter Plot & Correlation - {colonna_target} (Garmin)", fontsize=13, fontweight="bold")
+    plt.xlabel("Smart Earrings", fontsize=11)
     plt.ylabel("Garmin", fontsize=11)
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.legend(loc="upper left", frameon=True)
     
     # Inserisce i valori di R e Rho direttamente nel grafico in un box di testo
     testo_box = f"Pearson r: {r_pearson:.3f} (p: {p_pearson:.4f})\nSpearman ρ: {rho_spearman:.3f} (p: {p_spearman:.4f})"
-    plt.gca().text(0.05, 0.05, testo_box, transform=plt.gca().transAxes, fontsize=10,
-                   verticalalignment='bottom', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray'))
+    plt.gca().text(0.95, 0.05, testo_box, transform=plt.gca().transAxes, fontsize=10,
+                   verticalalignment='bottom', horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray'))
 
     plt.tight_layout()
     nome_file_corr = os.path.join(cartella_grafici_corr, f"correlazione_{colonna_target}.png")
