@@ -1,117 +1,189 @@
+import os
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from scipy import stats
-from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+import pingouin as pg
+from scipy.stats import wilcoxon, pearsonr, spearmanr
 
-# --- 1. CARICAMENTO DATI DA CSV ----
-file_path = 'c:/Users/arima/Desktop/Progetto/Dataset_confronto_garmin.csv' 
+# =====================================================================
+# 1. CARICAMENTO DEI DATI CON PERCORSI DINAMICI
+# =====================================================================
+cartella_script = os.path.dirname(os.path.abspath(__file__))
+
+# Nomi esatti dei file come da te indicati
+percorso_totale = os.path.join(cartella_script, "risultati_hrv_totale_CORRETTO.csv")
+percorso_garmin = os.path.join(cartella_script, "garmin140526.csv") 
 
 try:
-    # Prova con punto e virgola (standard italiano)
-    df_custom = pd.read_csv(file_path, sep=';')
-    if len(df_custom.columns) < 2: # Se non ha diviso le colonne, prova con la virgola
-        df_custom = pd.read_csv(file_path, sep=',')
-
-    # Pulizia nomi colonne
-    df_custom.columns = df_custom.columns.str.strip()
+    # Il file totale usa la virgola come separatore
+    df_totale = pd.read_csv(percorso_totale, sep=",")
+    # Il file Garmin usa il punto e virgola come separatore
+    df_garmin = pd.read_csv(percorso_garmin, sep=";") 
     
-    # STAMPA DI CONTROLLO: così vedi cosa sta leggendo Python
-    print(f"Colonne trovate nel CSV: {list(df_custom.columns)}")
-
-    # ESTRAZIONE DATI (Nomi esatti che mi hai confermato)
-    custom_bpm = df_custom['BPM'].tolist()[:7]
-    custom_sdnn = df_custom['SDNN'].tolist()[:7]
-    custom_rmssd = df_custom['RMSSD'].tolist()[:7]
-
-except KeyError as e:
-    print(f"ERRORE: La colonna {e} non esiste. Controlla che nel CSV non ci siano spazi o nomi diversi.")
-    exit()
-except Exception as e:
-    print(f"ERRORE CARICAMENTO: {e}")
+    print("File caricati con successo!\n")
+except FileNotFoundError as e:
+    print(f"Errore di caricamento: {e}")
+    print(f"Cartella in cui ho cercato: {cartella_script}")
+    print("Assicurati che i file CSV siano dentro la stessa cartella dello script python.")
     exit()
 
-# --- 2. DATI GARMIN ---
-data_input = {
-    'BPM_Medio': {
-        'custom': custom_bpm,
-        'garmin': [88.00, 93.00, 70.00, 107.00, 81.00, 79.00, 111.00]
-    },
-    'SDNN': {
-        'custom': custom_sdnn,
-        'garmin': [35.00, 28.00, 75.00, 48.00, 29.00, 80.00, 50.00]
-    },
-    'RMSSD': {
-        'custom': custom_rmssd,
-        'garmin': [26.00, 21.00, 60.00, 37.00, 23.00, 50.00, 16.00]
-    }
-}
+# Crea le cartelle per salvare i grafici se non esistono
+cartella_grafici_ba = os.path.join(cartella_script, "grafici_output_garmin", "bland_altman")
+cartella_grafici_corr = os.path.join(cartella_script, "grafici_output_garmin", "correlazione")
+os.makedirs(cartella_grafici_ba, exist_ok=True)
+os.makedirs(cartella_grafici_corr, exist_ok=True)
 
-def calculate_icc(g, c):
-    data = np.stack([g, c], axis=1)
-    n, k = data.shape
-    ms_between = np.var(data.mean(axis=1), ddof=1) * k
-    ms_within = data.var(axis=1, ddof=1).mean()
-    ms_raters = np.var(data.mean(axis=0), ddof=1) * n
-    ms_error = ((n-1)*(k-1)*ms_within - (k-1)*(ms_raters-ms_within)) / ((n-1)*(k-1))
-    return (ms_between - ms_error) / (ms_between + (k - 1) * ms_error + (k / n) * (ms_raters - ms_error))
+# =====================================================================
+# 2. SELEZIONE DELLE METRICHE (SOLO BPM, SDNN, RMSSD)
+# =====================================================================
+nomi_target = ['BPM_Medio', 'SDNN_ms', 'RMSSD_ms']
 
-summary_list = []
+# Filtra tenendo SOLO le colonne presenti in entrambi i file CHE SONO ANCHE nella lista nomi_target
+metriche_comuni = [
+    col for col in df_totale.columns 
+    if col in df_garmin.columns and col in nomi_target
+]
 
-# --- FIGURA 1: CORRELAZIONE (SCATTER) ---
-fig1, axes1 = plt.subplots(1, 3, figsize=(18, 5))
-fig1.suptitle('Analisi di Correlazione', fontsize=15, fontweight='bold')
+if not metriche_comuni:
+    print("ATTENZIONE: Non ho trovato nessuna colonna chiamata BPM, SDNN o RMSSD comune a entrambi i file.")
+    print(f"Colonne in Totale: {list(df_totale.columns)}")
+    print(f"Colonne in Garmin: {list(df_garmin.columns)}")
+    exit()
 
-for i, (m_name, vals) in enumerate(data_input.items()):
-    c, g = np.array(vals['custom']), np.array(vals['garmin'])
-    icc = calculate_icc(g, c)
-    r2 = r2_score(g, c)
-    mae, rmse = mean_absolute_error(g, c), np.sqrt(mean_squared_error(g, c))
-    mape = np.mean(np.abs((g - c) / g)) * 100
-    _, p_val = stats.wilcoxon(g, c)
-    summary_list.append([m_name, mae, rmse, mape, r2, icc, p_val])
+print(f"Rilevate {len(metriche_comuni)} metriche numeriche da analizzare:")
+for m in metriche_comuni:
+    print(f" - {m}")
+print("\n" + "=" * 80 + "\n")
 
-    # Allargamento assi (Scatter)
-    center = (g.min() + g.max()) / 2
-    span = (g.max() - g.min()) * 1.5 # Aumentiamo il range del 50%
-    axes1[i].set_xlim(center - span, center + span)
-    axes1[i].set_ylim(center - span, center + span)
-
-    axes1[i].scatter(g, c, color='dodgerblue', edgecolor='k', s=80, zorder=3)
-    axes1[i].plot([-200, 300], [-200, 300], 'r--', alpha=0.6, label='x=y')
-    axes1[i].set_title(f'{m_name}\nICC: {icc:.3f}')
-    axes1[i].grid(alpha=0.2)
-
-plt.tight_layout()
-plt.show()
-
-# --- FIGURA 2: BLAND-ALTMAN ---
-fig2, axes2 = plt.subplots(1, 3, figsize=(18, 5))
-fig2.suptitle('Bland-Altman: Analisi Errore ', fontsize=15, fontweight='bold')
-
-for i, (m_name, vals) in enumerate(data_input.items()):
-    c, g = np.array(vals['custom']), np.array(vals['garmin'])
-    diffs, means = c - g, (c + g) / 2
-    bias, sd_diff = np.mean(diffs), np.std(diffs, ddof=1)
-    uLoA, lLoA = bias + 1.96 * sd_diff, bias - 1.96 * sd_diff
+# =====================================================================
+# 3. FUNZIONE DI ANALISI PER SINGOLA METRICA
+# =====================================================================
+def analizza_metrica(colonna_target):
+    print(f"▶ ANALISI DI CONFRONTO: {colonna_target}")
+    print("-" * 50)
     
-    # Allargamento asse Y per far sembrare i punti più vicini allo zero
-    y_limit = max(abs(uLoA), abs(lLoA)) * 2.5 # Più alto è il numero, più i punti sembrano "schiacciati" sullo zero
-    axes2[i].set_ylim(-y_limit, y_limit)
+    # Estrazione dei primi 16 campioni (appaiati)
+    x = df_totale[colonna_target].head(16).to_numpy()
+    y = df_garmin[colonna_target].head(16).to_numpy()
     
-    axes2[i].scatter(means, diffs, color='mediumpurple', edgecolor='k', s=80, zorder=3)
-    axes2[i].axhline(bias, color='red', lw=2, label=f'Bias: {bias:.2f}')
-    axes2[i].axhline(uLoA, color='black', linestyle=':', alpha=0.6)
-    axes2[i].axhline(lLoA, color='black', linestyle=':', alpha=0.6)
-    axes2[i].axhline(0, color='gray', lw=1, alpha=0.3)
-    axes2[i].set_title(f'{m_name}')
-    axes2[i].grid(alpha=0.2)
+    # Controllo di sicurezza sui dati
+    if len(x) < 2 or np.all(x == y):
+        print(f"Dati insufficienti, mancanti o perfettamente identici per {colonna_target}.\n")
+        print("=" * 80 + "\n")
+        return
 
-plt.tight_layout()
-plt.show()
+    # --- 3a. METRICHE DI ERRORE ---
+    mae = np.mean(np.abs(x - y))
+    rmse = np.sqrt(np.mean((x - y) ** 2))
+    
+    maschera_non_zero = x != 0
+    if np.any(maschera_non_zero):
+        mape = np.mean(np.abs((x[maschera_non_zero] - y[maschera_non_zero]) / x[maschera_non_zero])) * 100
+        mape_str = f"{mape:.2f}%"
+    else:
+        mape_str = "N/D (Valori di riferimento pari a zero)"
 
-# --- 3. STAMPA TABELLA ---
-df_final = pd.DataFrame(summary_list, columns=['Metrica', 'MAE', 'RMSE', 'MAPE (%)', 'R2', 'ICC', 'p-value'])
-print("\n" + "="*85 + "\nTABELLA RIASSUNTIVA\n" + "-"*85)
-print(df_final.to_string(index=False, justify='center'))
-print("="*85)
+    print(f"  [Errori] MAE: {mae:.3f} | RMSE: {rmse:.3f} | MAPE: {mape_str}")
+
+    # --- 3b. TEST STATISTICO DI APPAIAMENTO (Wilcoxon) ---
+    try:
+        stat, p_value = wilcoxon(x, y)
+        esito = "SIGNIFICATIVO (Differenza sistematica)" if p_value < 0.05 else "NON SIGNIFICATIVO (Nessuna diff. sistematica)"
+        print(f"  [Wilcoxon] Statistica: {stat:.1f} | p-value: {p_value:.4f} -> {esito}")
+    except ValueError as e:
+        print(f"  [Wilcoxon] Impossibile calcolare: {e}")
+
+    # --- 3c. ANALISI DI CORRELAZIONE (Pearson e Spearman) ---
+    try:
+        r_pearson, p_pearson = pearsonr(x, y)
+        rho_spearman, p_spearman = spearmanr(x, y)
+        print(f"  [Correlazione]")
+        print(f"    - Pearson R: {r_pearson:.3f} (p-value: {p_pearson:.4f})")
+        print(f"    - Spearman Rho: {rho_spearman:.3f} (p-value: {p_spearman:.4f})")
+    except Exception as e:
+        print(f"  [Correlazione] Errore nel calcolo: {e}")
+
+    # --- 3d. COEFFICIENTE ICC ---
+    n_samples = len(x)
+    df_icc = pd.DataFrame({
+        "Targets": np.tile(np.arange(1, n_samples + 1), 2),
+        "Raters": ["Totale"] * n_samples + ["Garmin"] * n_samples,
+        "Scores": np.concatenate([x, y]),
+    })
+
+    try:
+        icc_results = pg.intraclass_corr(data=df_icc, targets="Targets", raters="Raters", ratings="Scores")
+        print("  [ICC] Risultati Intraclass Correlation:")
+        colonne_da_mostrare = [c for c in ['Type', 'Description', 'ICC', 'F', 'pval', 'CI95%'] if c in icc_results.columns]
+        
+        if len(colonne_da_mostrare) > 2:
+            print(icc_results[colonne_da_mostrare].to_string(index=False, justify='center', formatters={'ICC': '{:.3f}'.format, 'pval': '{:.4f}'.format}))
+        else:
+            print(icc_results.to_string(index=False))
+    except Exception as e:
+        print(f"  [ICC] Errore nel calcolo dell'ICC: {e}")
+    
+    print("")
+
+    # --- 3e. GRAFICO DI BLAND-ALTMAN ---
+    mean_m = (x + y) / 2
+    diff_m = x - y
+    md = np.mean(diff_m)
+    sd = np.std(diff_m, ddof=1)
+
+    loa_upper = md + 1.96 * sd
+    loa_lower = md - 1.96 * sd
+
+    plt.figure(figsize=(10, 5.5))
+    plt.scatter(mean_m, diff_m, color="darkcyan", alpha=0.7, edgecolors="k", s=90)
+    plt.axhline(md, color="red", linestyle="--", linewidth=1.5, label=f"Bias: {md:.2f}")
+    plt.axhline(loa_upper, color="blue", linestyle=":", linewidth=1.5, label=f"+1.96 SD (Upper LoA): {loa_upper:.2f}")
+    plt.axhline(loa_lower, color="blue", linestyle=":", linewidth=1.5, label=f"-1.96 SD (Lower LoA): {loa_lower:.2f}")
+    plt.title(f"Bland-Altman Plot - {colonna_target} (Garmin)", fontsize=13, fontweight="bold")
+    plt.xlabel("Media delle misure dei due dispositivi", fontsize=11)
+    plt.ylabel("Differenza (Totale - Garmin)", fontsize=11)
+    plt.grid(True, linestyle="--", alpha=0.5)
+    plt.legend(loc="upper right", frameon=True, shadow=True)
+
+    for i in range(len(x)):
+        plt.annotate(f"#{i+1}", (mean_m[i], diff_m[i]), xytext=(6, 4), textcoords="offset points", fontsize=9, fontweight="semibold")
+
+    plt.tight_layout()
+    nome_file_ba = os.path.join(cartella_grafici_ba, f"bland_altman_{colonna_target}.png")
+    plt.savefig(nome_file_ba, dpi=150)
+    plt.close()
+
+    # --- 3f. GRAFICO DI CORRELAZIONE (Scatter Plot SENZA Trendline) ---
+    plt.figure(figsize=(7.5, 6))
+    plt.scatter(x, y, color="purple", alpha=0.7, edgecolors="k", s=90, label="Dati Appaiati")
+    
+    # Linea di identità perfetta (X = Y) a scopo di confronto visivo
+    lims = [np.min([plt.xlim(), plt.ylim()]), np.max([plt.xlim(), plt.ylim()])]
+    plt.plot(lims, lims, color="gray", linestyle="--", alpha=0.7, label="Identità Perfetta (x=y)")
+    
+    plt.title(f"Scatter Plot & Correlazione - {colonna_target} (Garmin)", fontsize=13, fontweight="bold")
+    plt.xlabel("Totale (Smart Earrings)", fontsize=11)
+    plt.ylabel("Garmin", fontsize=11)
+    plt.grid(True, linestyle="--", alpha=0.5)
+    plt.legend(loc="upper left", frameon=True)
+    
+    # Inserisce i valori di R e Rho direttamente nel grafico in un box di testo
+    testo_box = f"Pearson r: {r_pearson:.3f} (p: {p_pearson:.4f})\nSpearman ρ: {rho_spearman:.3f} (p: {p_spearman:.4f})"
+    plt.gca().text(0.05, 0.05, testo_box, transform=plt.gca().transAxes, fontsize=10,
+                   verticalalignment='bottom', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray'))
+
+    plt.tight_layout()
+    nome_file_corr = os.path.join(cartella_grafici_corr, f"correlazione_{colonna_target}.png")
+    plt.savefig(nome_file_corr, dpi=150)
+    plt.close()
+
+    print(f"  [Grafici] Salvati in:\n    -> BA: {nome_file_ba}\n    -> Corr: {nome_file_corr}")
+    print("\n" + "=" * 80 + "\n")
+
+# =====================================================================
+# 4. ESECUZIONE CICLICA
+# =====================================================================
+for metrica in metriche_comuni:
+    analizza_metrica(metrica)
+
+print(f"Processo completato! Trovi i grafici organizzati nelle sottocartelle di:\n  {os.path.join(cartella_script, 'grafici_output_garmin')}")

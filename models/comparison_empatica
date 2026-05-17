@@ -10,8 +10,8 @@ from scipy.stats import wilcoxon, pearsonr, spearmanr
 # =====================================================================
 cartella_script = os.path.dirname(os.path.abspath(__file__))
 
-percorso_totale = os.path.join(cartella_script, "risultati_hrv_totale.csv")
-percorso_empatica = os.path.join(cartella_script, "risultati_hrv_EMPATICA.csv")
+percorso_totale = os.path.join(cartella_script, "risultati_hrv_totale_CORRETTO.csv")
+percorso_empatica = os.path.join(cartella_script, "risultati_hrv_EMPATICA_CORRETTO.csv")
 
 try:
     df_totale = pd.read_csv(percorso_totale, sep=",")
@@ -24,8 +24,8 @@ except FileNotFoundError as e:
     exit()
 
 # Crea le cartelle per salvare i grafici se non esistono
-cartella_grafici_ba = os.path.join(cartella_script, "grafici_output", "bland_altman")
-cartella_grafici_corr = os.path.join(cartella_script, "grafici_output", "correlazione")
+cartella_grafici_ba = os.path.join(cartella_script, "grafici_output_empatica", "bland_altman")
+cartella_grafici_corr = os.path.join(cartella_script, "grafici_output_empatica", "correlazione")
 os.makedirs(cartella_grafici_ba, exist_ok=True)
 os.makedirs(cartella_grafici_corr, exist_ok=True)
 
@@ -173,4 +173,4 @@ def analizza_metrica(colonna_target):
 for metrica in metriche_comuni:
     analizza_metrica(metrica)
 
-print(f"Processo completato! Trovi i grafici organizzati nelle sottocartelle di:\n  {os.path.join(cartella_script, 'grafici_output')}")
+print(f"Processo completato! Trovi i grafici organizzati nelle sottocartelle di:\n  {os.path.join(cartella_script, 'grafici_output_empatica')}")

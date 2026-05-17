@@ -1,5 +1,4 @@
 File,Battiti_Totali,Durata_Secondi,BPM_Medio,SDNN_ms,RMSSD_ms,pNN50_percent,LF_Power_ms2,HF_Power_ms2,Rapporto_LF_HF,Poincare_SD1_ms,Poincare_SD2_ms
-intervallo_1.csv,157,119.0,78.68,44.13,43.31,19.35,603.55,811.63,0.74,30.72,54.32
 intervallo_2.csv,154,118.7,77.37,56.3,62.77,40.79,1569.77,1616.03,0.97,44.53,66.0
 intervallo_3.csv,172,120.2,85.36,21.23,18.91,0.0,142.87,139.13,1.03,13.41,26.87
 intervallo_5.csv,207,120.1,102.89,37.97,26.82,4.88,412.75,479.35,0.86,19.01,50.23
