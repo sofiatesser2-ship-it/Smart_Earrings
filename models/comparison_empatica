@@ -61,10 +61,16 @@ def analizza_metrica(colonna_target):
     # --- 3a. METRICHE DI ERRORE ---
     mae = np.mean(np.abs(x - y))
     rmse = np.sqrt(np.mean((x - y) ** 2))
-    # Protezione da divisione per zero nel calcolo del MAPE
-    mape = np.mean(np.abs((x - y) / np.where(x == 0, 1e-5, x))) * 100
+    
+    # MAPE robusto: calcolato solo dove x (valore di riferimento) NON è zero
+    maschera_non_zero = x != 0
+    if np.any(maschera_non_zero):
+        mape = np.mean(np.abs((x[maschera_non_zero] - y[maschera_non_zero]) / x[maschera_non_zero])) * 100
+        mape_str = f"{mape:.2f}%"
+    else:
+        mape_str = "N/D (Valori di riferimento pari a zero)"
 
-    print(f"  [Errori] MAE: {mae:.3f} | RMSE: {rmse:.3f} | MAPE: {mape:.2f}%")
+    print(f"  [Errori] MAE: {mae:.3f} | RMSE: {rmse:.3f} | MAPE: {mape_str}")
 
     # --- 3b. TEST STATISTICO (Wilcoxon) ---
     try:
@@ -72,9 +78,9 @@ def analizza_metrica(colonna_target):
         esito = "SIGNIFICATIVO (Differenza sistematica)" if p_value < 0.05 else "NON SIGNIFICATIVO (Nessuna diff. sistematica)"
         print(f"  [Wilcoxon] Statistica: {stat:.1f} | p-value: {p_value:.4f} -> {esito}")
     except ValueError as e:
-        print(f"  [Wilcoxon] Impossibile calcolare (es. tutte le differenze sono pari a zero): {e}")
+        print(f"  [Wilcoxon] Impossibile calcolare: {e}")
 
-    # --- 3c. COEFFICIENTE ICC ---
+    # --- 3c. COEFFICIENTE ICC  ---
     n_samples = len(x)
     df_icc = pd.DataFrame({
         "Targets": np.tile(np.arange(1, n_samples + 1), 2),
@@ -84,14 +90,19 @@ def analizza_metrica(colonna_target):
 
     try:
         icc_results = pg.intraclass_corr(data=df_icc, targets="Targets", raters="Raters", ratings="Scores")
-        # Estraiamo l'ICC3k o ICC3 (Raters fissi / Misure ripetute) coerente con i confronti di dispositivi
-        icc_val = icc_results.loc[icc_results['Type'] == 'ICC3', 'ICC'].values[0]
-        icc_ci = icc_results.loc[icc_results['Type'] == 'ICC3', 'CI95%'].values[0]
-        print(f"  [ICC] Modello ICC3: {icc_val:.3f} [95% CI: {icc_ci}]")
+        
+        print("  [ICC] Risultati Intraclass Correlation:")
+        # Rendiamo la stampa compatta mostrando solo le colonne fondamentali se presenti
+        colonne_da_mostrare = [c for c in ['Type', 'Description', 'ICC', 'F', 'pval', 'CI95%'] if c in icc_results.columns]
+        
+        # Se non trova le colonne standard, mostra semplicemente tutto il DataFrame in modo pulito
+        if len(colonne_da_mostrare) > 2:
+            print(icc_results[colonne_da_mostrare].to_string(index=False, justify='center', formatters={'ICC': '{:.3f}'.format, 'pval': '{:.4f}'.format}))
+        else:
+            print(icc_results.to_string(index=False))
+            
     except Exception as e:
         print(f"  [ICC] Errore nel calcolo dell'ICC: {e}")
-    
-    print("")
 
     # --- 3d. GRAFICO DI BLAND-ALTMAN ---
     mean_m = (x + y) / 2
@@ -120,7 +131,6 @@ def analizza_metrica(colonna_target):
 
     plt.tight_layout()
     
-    # Salvataggio dinamico dell'immagine basato sul nome della metrica hrv
     nome_file_grafico = os.path.join(cartella_grafici, f"bland_altman_{colonna_target}.png")
     plt.savefig(nome_file_grafico, dpi=150)
     plt.close()
