@@ -105,7 +105,6 @@ for i, (m_name, vals) in enumerate(data_input.items()):
     axes2[i].axhline(lLoA, color='black', linestyle=':', alpha=0.6)
     axes2[i].axhline(0, color='gray', lw=1, alpha=0.3)
     axes2[i].set_title(f'{m_name}')
-    axes2[i].set_ylabel('Differenza (C - G)')
     axes2[i].grid(alpha=0.2)
 
 plt.tight_layout()

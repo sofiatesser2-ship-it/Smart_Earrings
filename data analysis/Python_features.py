@@ -5,7 +5,7 @@ from scipy.signal import find_peaks, welch
 from scipy.interpolate import interp1d
 
 # IMPOSTAZIONI
-FILE_PATH = 'ppg_200Hz_filtrato.csv'
+FILE_PATH = '140526.4.csv'
 COLONNA_SEGNALE = 'Final_Result'
 FS = 200
 
@@ -118,7 +118,7 @@ def analizza_da_csv(path, colonna, fs):
     ax3 = fig2.add_subplot(1, 1, 1)
     ax3.scatter(rr_clean[:-1], rr_clean[1:], color='purple', alpha=0.6, s=30)
     ax3.set_aspect('equal', adjustable='box') 
-    lims = [0, max(rr_clean)+20]
+    lims = [0, 1000]
     ax3.set_xlim(lims); ax3.set_ylim(lims)
     ax3.plot(lims, lims, 'k--', alpha=0.3)
     ax3.set_title("Poincaré Plot")
