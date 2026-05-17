@@ -99,7 +99,6 @@ def analizza_metrica(colonna_target):
         rho_spearman, p_spearman = spearmanr(x, y)
         print(f"  [Correlazione]")
         print(f"    - Pearson R: {r_pearson:.3f} (p-value: {p_pearson:.4f})")
-        print(f"    - Spearman Rho: {rho_spearman:.3f} (p-value: {p_spearman:.4f})")
     except Exception as e:
         print(f"  [Correlazione] Errore nel calcolo: {e}")
 
@@ -139,7 +138,7 @@ def analizza_metrica(colonna_target):
     plt.axhline(md, color="red", linestyle="--", linewidth=1.5, label=f"Bias: {md:.2f}")
     plt.axhline(loa_upper, color="blue", linestyle=":", linewidth=1.5, label=f"+1.96 SD (Upper LoA): {loa_upper:.2f}")
     plt.axhline(loa_lower, color="blue", linestyle=":", linewidth=1.5, label=f"-1.96 SD (Lower LoA): {loa_lower:.2f}")
-    plt.title(f"Bland-Altman Plot - {colonna_target}", fontsize=13, fontweight="bold")
+    plt.title(f"{colonna_target}", fontsize=15, fontweight="bold")
     plt.xlabel("Mean of the two measurements", fontsize=11)
     plt.ylabel("Difference (Smart Earrings - Garmin)", fontsize=11)
     plt.grid(True, linestyle="--", alpha=0.5)
@@ -158,15 +157,15 @@ def analizza_metrica(colonna_target):
     lims = [np.min([plt.xlim(), plt.ylim()]), np.max([plt.xlim(), plt.ylim()])]
     plt.plot(lims, lims, color="gray", linestyle="--", alpha=0.7, label="Identity Line (x=y)")
     
-    plt.title(f"Scatter Plot & Correlation - {colonna_target}", fontsize=13, fontweight="bold")
+    plt.title(f"{colonna_target}", fontsize=15, fontweight="bold")
     plt.xlabel("Smart Earrings", fontsize=11)
     plt.ylabel("Garmin", fontsize=11)
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.legend(loc="upper left", frameon=True)
     
     # Inserisce i valori di R e Rho direttamente nel grafico in un box di testo
-    testo_box = f"Pearson r: {r_pearson:.3f} (p: {p_pearson:.4f})\nSpearman ρ: {rho_spearman:.3f} (p: {p_spearman:.4f})"
-    plt.gca().text(0.95, 0.05, testo_box, transform=plt.gca().transAxes, fontsize=10,
+    testo_box = f"Pearson r: {r_pearson:.3f} (p: {p_pearson:.4f})"
+    plt.gca().text(0.95, 0.05, testo_box, transform=plt.gca().transAxes, fontsize=13,
                    verticalalignment='bottom', horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray'))
 
     plt.tight_layout()
