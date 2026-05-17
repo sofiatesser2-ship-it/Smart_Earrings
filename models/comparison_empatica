@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pingouin as pg
-from scipy.stats import wilcoxon
+from scipy.stats import wilcoxon, pearsonr, spearmanr
 
 # =====================================================================
 # 1. CARICAMENTO DEI DATI CON PERCORSI DINAMICI
@@ -23,14 +23,15 @@ except FileNotFoundError as e:
     print("Assicurati che i file CSV siano dentro la stessa cartella dello script python.")
     exit()
 
-# Crea una cartella per salvare i grafici se non esiste
-cartella_grafici = os.path.join(cartella_script, "grafici_output")
-os.makedirs(cartella_grafici, exist_ok=True)
+# Crea le cartelle per salvare i grafici se non esistono
+cartella_grafici_ba = os.path.join(cartella_script, "grafici_output", "bland_altman")
+cartella_grafici_corr = os.path.join(cartella_script, "grafici_output", "correlazione")
+os.makedirs(cartella_grafici_ba, exist_ok=True)
+os.makedirs(cartella_grafici_corr, exist_ok=True)
 
 # =====================================================================
 # 2. SELEZIONE RIGIDA DELLE METRICHE STRUTTURATE (Dal tuo CSV)
 # =====================================================================
-# Escludiamo esplicitamente 'File' e prendiamo solo le metriche numeriche reali
 metriche_comuni = [
     col for col in df_totale.columns 
     if col in df_empatica.columns and col != "File"
@@ -62,7 +63,6 @@ def analizza_metrica(colonna_target):
     mae = np.mean(np.abs(x - y))
     rmse = np.sqrt(np.mean((x - y) ** 2))
     
-    # MAPE robusto: calcolato solo dove x (valore di riferimento) NON è zero
     maschera_non_zero = x != 0
     if np.any(maschera_non_zero):
         mape = np.mean(np.abs((x[maschera_non_zero] - y[maschera_non_zero]) / x[maschera_non_zero])) * 100
@@ -72,7 +72,7 @@ def analizza_metrica(colonna_target):
 
     print(f"  [Errori] MAE: {mae:.3f} | RMSE: {rmse:.3f} | MAPE: {mape_str}")
 
-    # --- 3b. TEST STATISTICO (Wilcoxon) ---
+    # --- 3b. TEST STATISTICO DI APPAIAMENTO (Wilcoxon) ---
     try:
         stat, p_value = wilcoxon(x, y)
         esito = "SIGNIFICATIVO (Differenza sistematica)" if p_value < 0.05 else "NON SIGNIFICATIVO (Nessuna diff. sistematica)"
@@ -80,7 +80,17 @@ def analizza_metrica(colonna_target):
     except ValueError as e:
         print(f"  [Wilcoxon] Impossibile calcolare: {e}")
 
-    # --- 3c. COEFFICIENTE ICC  ---
+    # --- 3c. ANALISI DI CORRELAZIONE (Pearson e Spearman) ---
+    try:
+        r_pearson, p_pearson = pearsonr(x, y)
+        rho_spearman, p_spearman = spearmanr(x, y)
+        print(f"  [Correlazione]")
+        print(f"    - Pearson R: {r_pearson:.3f} (p-value: {p_pearson:.4f})")
+        print(f"    - Spearman Rho: {rho_spearman:.3f} (p-value: {p_spearman:.4f})")
+    except Exception as e:
+        print(f"  [Correlazione] Errore nel calcolo: {e}")
+
+    # --- 3d. COEFFICIENTE ICC ---
     n_samples = len(x)
     df_icc = pd.DataFrame({
         "Targets": np.tile(np.arange(1, n_samples + 1), 2),
@@ -90,21 +100,19 @@ def analizza_metrica(colonna_target):
 
     try:
         icc_results = pg.intraclass_corr(data=df_icc, targets="Targets", raters="Raters", ratings="Scores")
-        
         print("  [ICC] Risultati Intraclass Correlation:")
-        # Rendiamo la stampa compatta mostrando solo le colonne fondamentali se presenti
         colonne_da_mostrare = [c for c in ['Type', 'Description', 'ICC', 'F', 'pval', 'CI95%'] if c in icc_results.columns]
         
-        # Se non trova le colonne standard, mostra semplicemente tutto il DataFrame in modo pulito
         if len(colonne_da_mostrare) > 2:
             print(icc_results[colonne_da_mostrare].to_string(index=False, justify='center', formatters={'ICC': '{:.3f}'.format, 'pval': '{:.4f}'.format}))
         else:
             print(icc_results.to_string(index=False))
-            
     except Exception as e:
         print(f"  [ICC] Errore nel calcolo dell'ICC: {e}")
+    
+    print("")
 
-    # --- 3d. GRAFICO DI BLAND-ALTMAN ---
+    # --- 3e. GRAFICO DI BLAND-ALTMAN ---
     mean_m = (x + y) / 2
     diff_m = x - y
     md = np.mean(diff_m)
@@ -113,14 +121,12 @@ def analizza_metrica(colonna_target):
     loa_upper = md + 1.96 * sd
     loa_lower = md - 1.96 * sd
 
-    plt.figure(figsize=(11, 6))
+    plt.figure(figsize=(10, 5.5))
     plt.scatter(mean_m, diff_m, color="darkcyan", alpha=0.7, edgecolors="k", s=90)
-
     plt.axhline(md, color="red", linestyle="--", linewidth=1.5, label=f"Bias: {md:.2f}")
     plt.axhline(loa_upper, color="blue", linestyle=":", linewidth=1.5, label=f"+1.96 SD (Upper LoA): {loa_upper:.2f}")
     plt.axhline(loa_lower, color="blue", linestyle=":", linewidth=1.5, label=f"-1.96 SD (Lower LoA): {loa_lower:.2f}")
-
-    plt.title(f"Bland-Altman Plot - {colonna_target}", fontsize=14, fontweight="bold")
+    plt.title(f"Bland-Altman Plot - {colonna_target}", fontsize=13, fontweight="bold")
     plt.xlabel("Media delle misure dei due dispositivi", fontsize=11)
     plt.ylabel("Differenza (Totale - Empatica)", fontsize=11)
     plt.grid(True, linestyle="--", alpha=0.5)
@@ -130,12 +136,35 @@ def analizza_metrica(colonna_target):
         plt.annotate(f"#{i+1}", (mean_m[i], diff_m[i]), xytext=(6, 4), textcoords="offset points", fontsize=9, fontweight="semibold")
 
     plt.tight_layout()
-    
-    nome_file_grafico = os.path.join(cartella_grafici, f"bland_altman_{colonna_target}.png")
-    plt.savefig(nome_file_grafico, dpi=150)
+    nome_file_ba = os.path.join(cartella_grafici_ba, f"bland_altman_{colonna_target}.png")
+    plt.savefig(nome_file_ba, dpi=150)
     plt.close()
+
+    # --- 3f. GRAFICO DI CORRELAZIONE (Scatter Plot SENZA Trendline) ---
+    plt.figure(figsize=(7.5, 6))
+    plt.scatter(x, y, color="purple", alpha=0.7, edgecolors="k", s=90, label="Dati Appaiati")
     
-    print(f"  [Grafico] Salvato con successo in: {nome_file_grafico}")
+    # Linea di identità perfetta (X = Y) a scopo di confronto visivo
+    lims = [np.min([plt.xlim(), plt.ylim()]), np.max([plt.xlim(), plt.ylim()])]
+    plt.plot(lims, lims, color="gray", linestyle="--", alpha=0.7, label="Identità Perfetta (x=y)")
+    
+    plt.title(f"Scatter Plot & Correlazione - {colonna_target}", fontsize=13, fontweight="bold")
+    plt.xlabel("Totale (Smart Earrings)", fontsize=11)
+    plt.ylabel("Empatica", fontsize=11)
+    plt.grid(True, linestyle="--", alpha=0.5)
+    plt.legend(loc="upper left", frameon=True)
+    
+    # Inserisce i valori di R e Rho direttamente nel grafico in un box di testo
+    testo_box = f"Pearson r: {r_pearson:.3f} (p: {p_pearson:.4f})\nSpearman ρ: {rho_spearman:.3f} (p: {p_spearman:.4f})"
+    plt.gca().text(0.05, 0.05, testo_box, transform=plt.gca().transAxes, fontsize=10,
+                   verticalalignment='bottom', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray'))
+
+    plt.tight_layout()
+    nome_file_corr = os.path.join(cartella_grafici_corr, f"correlazione_{colonna_target}.png")
+    plt.savefig(nome_file_corr, dpi=150)
+    plt.close()
+
+    print(f"  [Grafici] Salvati in:\n    -> BA: {nome_file_ba}\n    -> Corr: {nome_file_corr}")
     print("\n" + "=" * 80 + "\n")
 
 # =====================================================================
@@ -144,4 +173,4 @@ def analizza_metrica(colonna_target):
 for metrica in metriche_comuni:
     analizza_metrica(metrica)
 
-print(f"Processo completato! Trovi tutti i grafici nella cartella:\n  {cartella_grafici}")
+print(f"Processo completato! Trovi i grafici organizzati nelle sottocartelle di:\n  {os.path.join(cartella_script, 'grafici_output')}")
