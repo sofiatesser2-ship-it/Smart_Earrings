@@ -126,10 +126,10 @@ def analizza_metrica(colonna_target):
     plt.axhline(loa_upper, color="blue", linestyle=":", linewidth=1.5, label=f"+1.96 SD (Upper LoA): {loa_upper:.2f}")
     plt.axhline(loa_lower, color="blue", linestyle=":", linewidth=1.5, label=f"-1.96 SD (Lower LoA): {loa_lower:.2f}")
     plt.title(f"{colonna_target}", fontsize=15, fontweight="bold")
-    plt.xlabel("Mean of the two measurements", fontsize=11)
-    plt.ylabel("Difference (Smart Earrings - Empatica)", fontsize=11)
+    plt.xlabel("Mean of the two measurements", fontsize=12)
+    plt.ylabel("Difference (Smart Earrings - Empatica)", fontsize=12)
     plt.grid(True, linestyle="--", alpha=0.5)
-    plt.legend(loc="upper right", frameon=True, shadow=True)
+    plt.legend(loc="upper right", frameon=True, shadow=True, prop={'size': 12})
 
     plt.tight_layout()
     nome_file_ba = os.path.join(cartella_grafici_ba, f"bland_altman_{colonna_target}.png")
@@ -145,10 +145,10 @@ def analizza_metrica(colonna_target):
     plt.plot(lims, lims, color="gray", linestyle="--", alpha=0.7, label="Identity Line (x=y)")
     
     plt.title(f"{colonna_target}", fontsize=15, fontweight="bold")
-    plt.xlabel("Smart Earrings", fontsize=11)
-    plt.ylabel("Empatica", fontsize=11)
+    plt.xlabel("Smart Earrings", fontsize=12)
+    plt.ylabel("Empatica", fontsize=12)
     plt.grid(True, linestyle="--", alpha=0.5)
-    plt.legend(loc="upper left", frameon=True)
+    plt.legend(loc="upper left", frameon=True, prop={'size': 12})
     
     # Inserisce i valori di R e Rho direttamente nel grafico in un box di testo
     testo_box = f"Pearson r: {r_pearson:.3f} (p: {p_pearson:.4f})"
