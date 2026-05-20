@@ -164,7 +164,7 @@ def analizza_metrica(colonna_target):
     plt.legend(loc="upper left", frameon=True, prop={'size': 12})
     
     # Inserisce i valori di R e Rho direttamente nel grafico in un box di testo
-    testo_box = f"Pearson r: {r_pearson:.3f} (p: {p_pearson:.4f})"
+    testo_box = f"Pearson r: {r_pearson:.3f}"
     plt.gca().text(0.95, 0.05, testo_box, transform=plt.gca().transAxes, fontsize=13,
                    verticalalignment='bottom', horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray'))
 
