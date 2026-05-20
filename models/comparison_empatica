@@ -85,7 +85,7 @@ def analizza_metrica(colonna_target):
         r_pearson, p_pearson = pearsonr(x, y)
         rho_spearman, p_spearman = spearmanr(x, y)
         print(f"  [Correlazione]")
-        print(f"    - Pearson R: {r_pearson:.3f} (p-value: {p_pearson:.4f})")
+        print(f"    - Pearson R: {r_pearson:.3f}")
     except Exception as e:
         print(f"  [Correlazione] Errore nel calcolo: {e}")
 
