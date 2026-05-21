@@ -135,9 +135,9 @@ def analizza_metrica(colonna_target):
 
     plt.figure(figsize=(10, 5.5))
     plt.scatter(mean_m, diff_m, color="darkcyan", alpha=0.7, edgecolors="k", s=90)
-    plt.axhline(md, color="red", linestyle="--", linewidth=1.5, label=f"Bias: {md:.2f}")
-    plt.axhline(loa_upper, color="blue", linestyle=":", linewidth=1.5, label=f"+1.96 SD (Upper LoA): {loa_upper:.2f}")
-    plt.axhline(loa_lower, color="blue", linestyle=":", linewidth=1.5, label=f"-1.96 SD (Lower LoA): {loa_lower:.2f}")
+    plt.axhline(md, color="red", linestyle="--", linewidth=2.5, label=f"Bias: {md:.2f}")
+    plt.axhline(loa_upper, color="blue", linestyle=":", linewidth=2.5, label=f"+1.96 SD (Upper LoA): {loa_upper:.2f}")
+    plt.axhline(loa_lower, color="blue", linestyle=":", linewidth=2.5, label=f"-1.96 SD (Lower LoA): {loa_lower:.2f}")
     plt.title(f"{colonna_target}", fontsize=15, fontweight="bold")
     plt.xlabel("Mean of the two measurements", fontsize=12)
     plt.ylabel("Difference (Smart Earrings - Garmin)", fontsize=12)
