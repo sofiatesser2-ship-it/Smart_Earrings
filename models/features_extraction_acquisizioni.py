@@ -108,7 +108,7 @@ def process_ppg_file(file_path, subject_name, condition):
             sd1, sd2 = calculate_poincare_features(win)
             
             features.append({
-                'Subject': subject_name.capitalize(), # Es: "Arianna", "Chiara", "Sofia"
+                'Subject': subject_name.upper(), # Es: "S1", "S2"
                 'BPM': bpm, 'RMSSD': rmssd, 'SDNN': sdnn, 
                 'PNN50': pnn50, 'SD1': sd1, 'SD2': sd2,
                 'LF_HF': lf_hf, 'Label': label
@@ -119,26 +119,35 @@ def process_ppg_file(file_path, subject_name, condition):
 # --- 3. PROCESSO PRINCIPALE ---
 
 if __name__ == "__main__":
-    # Si posiziona nella cartella principale 'Smart_Earrings'
-    BASE_PATH = os.path.dirname(os.path.abspath(__file__))
-    BASE_PATH = os.path.dirname(BASE_PATH) 
+    # Rileva la cartella dove si trova questo script
+    CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+    
+    # Risale alla cartella principale 'Smart_Earrings' e punta a 'acquisizioni_stress'
+    BASE_PATH = os.path.dirname(CURRENT_DIR) 
+    DATA_PATH = os.path.join(BASE_PATH, 'acquisizioni_stress')
 
-    print(f"Cartella di scansione automatica: {BASE_PATH}")
+    print(f"Cartella di scansione automatica: {DATA_PATH}")
+    
+    # Controllo di sicurezza se la cartella esiste effettivamente
+    if not os.path.exists(DATA_PATH):
+        print(f"❌ Errore: La cartella '{DATA_PATH}' non esiste. Verifica la sua posizione.")
+        exit()
+
     print("Inizio scansione e ricerca file compatibili...")
     
-    # Dizionario principale raggruppato per PERSONA (chiavi: 'arianna', 'chiara', 'sofia')
+    # Dizionario principale raggruppato per PERSONA (chiavi: 's1', 's2', ecc.)
     person_features = {}
-    pattern = re.compile(r"([a-zA-Z]+)_(baseline|stress)(\d+)\.csv", re.IGNORECASE)
+    pattern = re.compile(r"^(s\d+)_(baseline|stress)(\d+)\.csv", re.IGNORECASE)
 
-    for filename in os.listdir(BASE_PATH):
+    for filename in os.listdir(DATA_PATH):
         match = pattern.match(filename)
         if match:
             soggetto = match.group(1).lower()
             condizione = match.group(2).lower()
             sessione = match.group(3)
             
-            file_full_path = os.path.join(BASE_PATH, filename)
-            print(f"-> Analisi file PPG: {filename} (Persona: {soggetto.capitalize()} | Sessione: {sessione} | Tipo: {condizione.capitalize()})")
+            file_full_path = os.path.join(DATA_PATH, filename)
+            print(f"-> Analisi file PPG: {filename} (Soggetto: {soggetto.upper()} | Sessione: {sessione} | Tipo: {condizione.capitalize()})")
             
             extracted_data = process_ppg_file(file_full_path, soggetto, condizione)
             
@@ -147,35 +156,36 @@ if __name__ == "__main__":
                     person_features[soggetto] = []
                 person_features[soggetto].extend(extracted_data)
 
-    # Normalizzazione per PERSONA (Rispetto alla Baseline complessiva della specifica persona)
+    # Normalizzazione per PERSONA (Rispetto alla Baseline complessiva del soggetto)
     all_dfs = []
     for persona, data_list in person_features.items():
         df_person = pd.DataFrame(data_list)
         
-        # Verifica che per questa persona ci sia almeno un file di Baseline per calcolare la media di riferimento
+        # Verifica che per questa persona ci sia almeno un file di Baseline
         if df_person.empty or 'Baseline' not in df_person['Label'].values:
-            print(f"⚠️ Persona {persona.capitalize()} saltata: manca del tutto la Baseline o dati insufficienti.")
+            print(f"⚠️ Soggetto {persona.upper()} saltato: manca del tutto la Baseline o dati insufficienti.")
             continue
             
         df_person = df_person.dropna(subset=['BPM', 'RMSSD', 'SDNN', 'PNN50', 'SD1', 'SD2'])
         cols = ['BPM', 'RMSSD', 'SDNN', 'PNN50', 'SD1', 'SD2', 'LF_HF']
         
-        # Calcola la media delle feature aggregando TUTTE le sessioni di Baseline di QUESTA persona
+        # Calcola la media delle feature aggregando TUTTE le sessioni di Baseline di QUESTO soggetto
         person_base_means = df_person[df_person['Label'] == 'Baseline'][cols].mean()
         if person_base_means.isnull().any():
             continue
             
-        # Normalizzazione: divide ogni record (Baseline e Stress) per la media di Baseline della persona
+        # Normalizzazione: divide ogni record per la media di Baseline del soggetto
         for c in cols:
             if person_base_means[c] > 0:
                 df_person[c] = df_person[c] / person_base_means[c]
                 
         all_dfs.append(df_person.dropna())
-        print(f"✅ Normalizzazione completata con successo per il soggetto: {persona.capitalize()}")
+        print(f"✅ Normalizzazione completata con successo per il soggetto: {persona.upper()}")
 
     # Salvataggio complessivo sul file finale
     if all_dfs:
         final_df = pd.concat(all_dfs, ignore_index=True)
+        # Salva il dataset risultante dentro la cartella principale 'Smart_Earrings'
         output_filename = os.path.join(BASE_PATH, 'features_extraction_new_dataset.csv')
         final_df.to_csv(output_filename, index=False)
         print(f"\n🎉 Dataset normalizzato per persona salvato con successo!")
@@ -186,4 +196,4 @@ if __name__ == "__main__":
         print("\nDistribuzione complessiva per Label:")
         print(final_df.groupby('Label').size())
     else:
-        print("\n❌ Errore: Nessun dato generato. Verifica l'integrità dei file segnale.")
+        print(f"\n❌ Errore: Nessun dato generato. Verifica che ci siano file corretti in {DATA_PATH}")
