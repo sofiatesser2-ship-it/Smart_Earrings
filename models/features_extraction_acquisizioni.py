@@ -28,7 +28,10 @@ def calculate_lf_hf(ibi_ms):
         t_res = np.arange(times[0], times[-1], 0.25)
         
         signal = f_interp(t_res)
-        signal = signal - np.mean(signal)
+        
+        # CORREZIONE: Detrendizzazione lineare anziché solo rimozione della media
+        # Rimuove le derive lente che gonfiano artificialmente la banda LF
+        signal = signal - np.polyval(np.polyfit(t_res, signal, 1), t_res)
         
         nperseg = min(len(signal), 256)
         f, psd = welch(signal, fs=4, nperseg=nperseg)
@@ -48,7 +51,7 @@ def clean_ibi(ibi_ms):
 # --- 2. ELABORAZIONE DEL SEGNALE PPG DIRETTO ---
 
 def process_ppg_file(file_path, subject_name, condition):
-    """Carica il segnale PPG, trova i picchi e assegna la Label (Baseline o Stress)."""
+    """Carica il segnale PPG, pulisce i picchi dagli artefatti da movimento e assegna la Label."""
     try:
         df = pd.read_csv(file_path)
         col_target = next((c for c in df.columns if c.lower() == 'final_result'), None)
@@ -62,7 +65,6 @@ def process_ppg_file(file_path, subject_name, condition):
         
         signal = df[col_target].values
         timestamps_ms = df[col_time].values
-        timestamps_sec = timestamps_ms / 1000.0
         
     except Exception as e:
         print(f"   [Errore] Lettura fallita per {os.path.basename(file_path)}: {e}")
@@ -71,44 +73,89 @@ def process_ppg_file(file_path, subject_name, condition):
     if len(signal) < 1000:
         return []
 
-    # Trova i picchi del segnale PPG (frequenza campionamento 200Hz)
-    peaks, _ = find_peaks(signal, distance=80, prominence=np.std(signal)*0.2)
+    # 1. RILEVAMENTO PICCHI ADATTIVO 
+    # Usiamo una prominence fissa e una distanza minima realistica (a 200Hz, 80 campioni = 400ms, max 150 BPM)
+    peaks, _ = find_peaks(signal, distance=80, prominence=np.percentile(signal, 75) * 0.15)
     
     if len(peaks) < 10:
         return []
 
-    # Genera i veri Inter-Beat Intervals (IBI) in millisecondi
-    peak_times_ms = timestamps_ms[peaks]
-    peak_times_sec = timestamps_sec[peaks]
+    # Interpolazione Parabolica Sub-sample per la precisione temporale
+    refined_peak_times_ms = []
+    fs = 200.0
+    dt = 1000.0 / fs
+
+    for p in peaks:
+        if p > 0 and p < len(signal) - 1:
+            y1 = signal[p-1]
+            y2 = signal[p]
+            y3 = signal[p+1]
+            denominator = (2.0 * y2 - y1 - y3)
+            shift = 0.5 * (y1 - y3) / denominator if abs(denominator) > 1e-5 else 0.0
+            refined_peak_times_ms.append(timestamps_ms[p] + (shift * dt))
+        else:
+            refined_peak_times_ms.append(timestamps_ms[p])
+
+    refined_peak_times_ms = np.array(refined_peak_times_ms)
     
-    ibi_values = np.diff(peak_times_ms)
-    ibi_offsets_sec = peak_times_sec[1:]
+    # 2. RIMOZIONE FILTRATA DEGLI ARTEFATTI (Outlier Protection)
+    raw_ibi = np.diff(refined_peak_times_ms)
+    raw_offsets_sec = (refined_peak_times_ms / 1000.0)[1:]
+    
+    valid_ibi = []
+    valid_offsets = []
+    
+    for i in range(len(raw_ibi)):
+        start_idx = max(0, i-4)
+        end_idx = min(len(raw_ibi), i+4)
+        local_median = np.median(raw_ibi[start_idx:end_idx])
+        
+        if (400 <= raw_ibi[i] <= 1300) and (abs(raw_ibi[i] - local_median) < 0.2 * local_median):
+            valid_ibi.append(raw_ibi[i])
+            valid_offsets.append(raw_offsets_sec[i])
+            
+    ibi_values = np.array(valid_ibi)
+    ibi_offsets_sec = np.array(valid_offsets)
+
+    if len(ibi_values) < 20:
+        return []
 
     features = []
-    window_size = 120  # Finestra mobile di 2 minuti
-    step = 10         # Avanzamento di 10 secondi
+    step = 10  # Avanzamento di 10 secondi per entrambe le finestre
+
+    # FINESTRE DIFFERENZIATE
+    win_hrv_size = 60    # 1 minuto per le metriche temporali e geometriche
+    win_lfhf_size = 120  # 2 minuti per la metrica spettrale LF_HF
 
     min_time = ibi_offsets_sec.min()
     max_time = ibi_offsets_sec.max()
-
     label = 'Baseline' if condition == 'baseline' else 'Stress'
 
-    for sw in np.arange(min_time, max_time - window_size, step):
-        mask = (ibi_offsets_sec >= sw) & (ibi_offsets_sec < sw + window_size)
-        win = ibi_values[mask]
+    for sw in np.arange(min_time, max_time - win_hrv_size, step):
+        # Finestra corta (1 minuto) per BPM, RMSSD, SDNN, PNN50, SD1, SD2
+        mask_short = (ibi_offsets_sec >= sw) & (ibi_offsets_sec < sw + win_hrv_size)
+        win_short = clean_ibi(ibi_values[mask_short])
         
-        win = clean_ibi(win)
+        # Finestra lunga (2 minuti) per LF_HF, sincronizzata alla fine della finestra corta
+        mask_long = (ibi_offsets_sec >= (sw + win_hrv_size - win_lfhf_size)) & (ibi_offsets_sec < sw + win_hrv_size)
+        win_long = clean_ibi(ibi_values[mask_long])
         
-        if len(win) >= 20:
-            bpm = 60000 / np.mean(win)
-            rmssd = np.sqrt(np.mean(np.diff(win)**2))
-            sdnn = np.std(win)
-            lf_hf = calculate_lf_hf(win)
-            pnn50 = calculate_pnn50(win)
-            sd1, sd2 = calculate_poincare_features(win)
+        # Generiamo il record se la finestra da un minuto ha dati sufficienti
+        if len(win_short) >= 15:
+            bpm = 60000 / np.mean(win_short)
+            rmssd = np.sqrt(np.mean(np.diff(win_short)**2))
+            sdnn = np.std(win_short)
+            pnn50 = calculate_pnn50(win_short)
+            sd1, sd2 = calculate_poincare_features(win_short)
+            
+            # Calcoliamo LF_HF sui 2 minuti solo se siamo abbastanza avanti nel file da coprire l'intera finestra
+            if len(win_long) >= 20:
+                lf_hf = calculate_lf_hf(win_long)
+            else:
+                lf_hf = np.nan
             
             features.append({
-                'Subject': subject_name.upper(), # Es: "S1", "S2"
+                'Subject': subject_name.upper(),
                 'BPM': bpm, 'RMSSD': rmssd, 'SDNN': sdnn, 
                 'PNN50': pnn50, 'SD1': sd1, 'SD2': sd2,
                 'LF_HF': lf_hf, 'Label': label
@@ -118,24 +165,24 @@ def process_ppg_file(file_path, subject_name, condition):
 
 # --- 3. PROCESSO PRINCIPALE ---
 
+from pathlib import Path
+
 if __name__ == "__main__":
-    # Rileva la cartella dove si trova questo script
-    CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+    BASE_PATH = Path(__file__).resolve().parents[1]
     
-    # Risale alla cartella principale 'Smart_Earrings' e punta a 'acquisizioni_stress'
-    BASE_PATH = os.path.dirname(CURRENT_DIR) 
-    DATA_PATH = os.path.join(BASE_PATH, 'acquisizioni_stress')
+    # Gestione robusta del nome della cartella (con o senza errore di battitura)
+    DATA_PATH = BASE_PATH / 'acquisizoni_stress'
+    if not DATA_PATH.exists():
+        DATA_PATH = BASE_PATH / 'acquisizioni_stress'
 
     print(f"Cartella di scansione automatica: {DATA_PATH}")
     
-    # Controllo di sicurezza se la cartella esiste effettivamente
-    if not os.path.exists(DATA_PATH):
-        print(f"❌ Errore: La cartella '{DATA_PATH}' non esiste. Verifica la sua posizione.")
+    if not DATA_PATH.exists():
+        print(f"❌ Errore: La cartella delle acquisizioni non esiste. Verifica la sua posizione.")
         exit()
 
     print("Inizio scansione e ricerca file compatibili...")
     
-    # Dizionario principale raggruppato per PERSONA (chiavi: 's1', 's2', ecc.)
     person_features = {}
     pattern = re.compile(r"^(s\d+)_(baseline|stress)(\d+)\.csv", re.IGNORECASE)
 
@@ -146,54 +193,72 @@ if __name__ == "__main__":
             condizione = match.group(2).lower()
             sessione = match.group(3)
             
-            file_full_path = os.path.join(DATA_PATH, filename)
+            file_full_path = DATA_PATH / filename
             print(f"-> Analisi file PPG: {filename} (Soggetto: {soggetto.upper()} | Sessione: {sessione} | Tipo: {condizione.capitalize()})")
             
-            extracted_data = process_ppg_file(file_full_path, soggetto, condizione)
+            extracted_data = process_ppg_file(str(file_full_path), soggetto, condizione)
             
             if extracted_data:
                 if soggetto not in person_features:
                     person_features[soggetto] = []
                 person_features[soggetto].extend(extracted_data)
 
-    # Normalizzazione per PERSONA (Rispetto alla Baseline complessiva del soggetto)
+    # Normalizzazione per PERSONA
     all_dfs = []
     for persona, data_list in person_features.items():
         df_person = pd.DataFrame(data_list)
         
-        # Verifica che per questa persona ci sia almeno un file di Baseline
         if df_person.empty or 'Baseline' not in df_person['Label'].values:
             print(f"⚠️ Soggetto {persona.upper()} saltato: manca del tutto la Baseline o dati insufficienti.")
             continue
             
+        # Non droppiamo subito LF_HF qui per non perdere le righe che hanno solo i NaN dovuti alla finestra da 2 min
         df_person = df_person.dropna(subset=['BPM', 'RMSSD', 'SDNN', 'PNN50', 'SD1', 'SD2'])
         cols = ['BPM', 'RMSSD', 'SDNN', 'PNN50', 'SD1', 'SD2', 'LF_HF']
         
-        # Calcola la media delle feature aggregando TUTTE le sessioni di Baseline di QUESTO soggetto
         person_base_means = df_person[df_person['Label'] == 'Baseline'][cols].mean()
-        if person_base_means.isnull().any():
+        if person_base_means.drop('LF_HF').isnull().any():
             continue
             
-        # Normalizzazione: divide ogni record per la media di Baseline del soggetto
         for c in cols:
             if person_base_means[c] > 0:
                 df_person[c] = df_person[c] / person_base_means[c]
                 
-        all_dfs.append(df_person.dropna())
+        all_dfs.append(df_person)
         print(f"✅ Normalizzazione completata con successo per il soggetto: {persona.upper()}")
 
-    # Salvataggio complessivo sul file finale
     if all_dfs:
         final_df = pd.concat(all_dfs, ignore_index=True)
-        # Salva il dataset risultante dentro la cartella principale 'Smart_Earrings'
-        output_filename = os.path.join(BASE_PATH, 'features_extraction_new_dataset.csv')
+        output_filename = BASE_PATH / 'features_extraction_new_dataset.csv'
         final_df.to_csv(output_filename, index=False)
+        
         print(f"\n🎉 Dataset normalizzato per persona salvato con successo!")
         print(f"➡️ '{output_filename}'")
         print(f"Record totali generati: {len(final_df)}")
+        
+        print("\n" + "="*65)
+        print("📊 REPORT DI VERIFICA DEI DATI (MEDIE NORMALIZZATE)")
+        print("="*65)
+        print("💡 Linee guida per il controllo:")
+        print("  - Baseline: i valori DEVONO essere uguali o vicinissimi a 1.0.")
+        print("  - Stress: ci si aspetta BPM > 1.0 e metriche HRV (RMSSD, SDNN...) < 1.0.\n")
+        
+        metric_cols = ['BPM', 'RMSSD', 'SDNN', 'PNN50', 'SD1', 'SD2', 'LF_HF']
+        
+        print("--- MEDIE GENERALI PER CONDIZIONE ---")
+        print(final_df.groupby('Label')[metric_cols].mean().round(3))
+        
+        print("\n--- DETTAGLIO MEDIE PER SOGGETTO ---")
+        print(final_df.groupby(['Subject', 'Label'])[metric_cols].mean().round(3))
+        
+        print("\n--- VERIFICA INTEGRITÀ E RECORD ---")
+        # Conta quanti NaN ci sono (principalmente saranno nella colonna LF_HF all'inizio dei file brevi)
+        print(f"🔍 Valori NaN/Nulli residui: {final_df[metric_cols].isnull().sum().to_dict()}")
         print("\nDistribuzione record per Persona:")
         print(final_df.groupby('Subject').size())
         print("\nDistribuzione complessiva per Label:")
         print(final_df.groupby('Label').size())
+        print("="*65)
+        
     else:
         print(f"\n❌ Errore: Nessun dato generato. Verifica che ci siano file corretti in {DATA_PATH}")
