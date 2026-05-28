@@ -3,13 +3,14 @@ import pandas as pd
 import seaborn as sns
 
 # 1. Carica il dataset
-file_path = "features_extraction.csv"
+file_path = "features_extraction_new_dataset.csv"
 df = pd.read_csv(file_path)
 
 features = ["BPM", "RMSSD", "SDNN", "PNN50", "SD1", "SD2", "LF_HF"]
 df = df.dropna(subset=features)
 
 # --- 2. CONFIGURAZIONE STILE ---
+# Usiamo 'white' per eliminare completamente le linee grigie di sfondo (grid)
 sns.set_theme(style="white", context="paper")
 plt.rcParams.update(
     {
@@ -20,19 +21,12 @@ plt.rcParams.update(
     }
 )
 
-# Definizione esplicita dell'ordine delle categorie sull'asse X
-target_order = ["Baseline", "Social_Stress", "Cognitive_Stress"]
+# Colori pieni e moderni
+colors = {"Baseline": "#3a86ff", "Stress": "#ff006e"}
 
-# Palette colori aggiornata a 3 categorie (Colori pieni e moderni)
-colors = {
-    "Baseline": "#3a86ff",  # Blu
-    "Social_Stress": "#ff006e",  # Magenta/Rosa forte
-    "Cognitive_Stress": "#ffbe0b",  # Giallo ambra/Arancio
-}
-
-fig, axes = plt.subplots(2, 4, figsize=(22, 10))  # Allargato leggermente per fare spazio a 3 categorie
+fig, axes = plt.subplots(2, 4, figsize=(20, 10))
 fig.suptitle(
-    "Features HRV: Baseline vs Stress Conditions",
+    " Features HRV: Baseline vs Stress",
     fontsize=20,
     fontweight="bold",
     y=0.98,
@@ -51,7 +45,6 @@ for i, feature in enumerate(features):
         x="Label",
         y=feature,
         data=df,
-        order=target_order,  # Forza l'ordine delle colonne
         ax=ax,
         hue="Label",
         palette=colors,
@@ -63,25 +56,25 @@ for i, feature in enumerate(features):
         zorder=1,
     )
 
-    # B) VIOLIN PLOT
+    # B) VIOLIN PLOT (Senza rettangoli o linee bianche interne: inner=None)
     sns.violinplot(
         x="Label",
         y=feature,
         data=df,
-        order=target_order,  # Forza l'ordine delle colonne
         ax=ax,
         hue="Label",
         palette=colors,
         legend=False,
-        inner=None,
+        inner=None,  # Rimuove il rettangolo nero e la linea bianca di default!
         alpha=0.6,
         cut=0,
         linewidth=1.2,
         zorder=2,
     )
 
-    # C) INDICATORI STATISTICI PULITI (Ciclo aggiornato a 3 categorie)
-    for group_idx, label in enumerate(target_order):
+    # C) INDICATORI STATISTICI PULITI (Disegnati a mano per massimo controllo)
+    # Calcoliamo media e mediana per ogni classe per metterle graficamente in modo elegante
+    for group_idx, label in enumerate(["Baseline", "Stress"]):
         group_data = df[df["Label"] == label][feature]
         if not group_data.empty:
             mean_val = group_data.mean()
@@ -108,7 +101,7 @@ for i, feature in enumerate(features):
                 zorder=4,
             )
 
-    # D) LINEA DI RIFERIMENTO BASELINE (Tratteggiata a 1.0)
+    # D) LINEA DI RIFERIMENTO BASELINE (Tratteggiata rossa/scura a 1.0)
     ax.axhline(1.0, color="#6c757d", linestyle="--", alpha=0.7, linewidth=1.2)
 
     # Pulizia etichette e grafiche
