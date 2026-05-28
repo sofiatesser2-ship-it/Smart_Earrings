@@ -6,7 +6,7 @@ from scipy.interpolate import interp1d
 from pathlib import Path
 
 # IMPOSTAZIONI
-FILE_PATH = '140526.3.csv'
+FILE_PATH = 's1_baseline1.csv'
 COLONNA_SEGNALE = 'Final_Result'
 FS = 200
 
@@ -14,7 +14,7 @@ def analizza_da_csv(path, colonna, fs):
     # 1. Caricamento dati
     try:
         script_dir = Path(__file__).resolve().parent
-        percorso_completo = script_dir.parent / 'acquisizioni_confronto' / path
+        percorso_completo = script_dir.parent / 'acquisizioni_stress' / path
         
         # Spostiamo il print all'inizio assoluto del try per essere sicuri che lo legga
         print(f"--> Tentativo di apertura: {percorso_completo}")
