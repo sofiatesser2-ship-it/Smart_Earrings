@@ -6,7 +6,7 @@ from scipy.interpolate import interp1d
 from pathlib import Path
 
 # IMPOSTAZIONI
-FILE_PATH = 's4_stress1.csv'
+FILE_PATH = 's7_baseline1.csv'
 COLONNA_SEGNALE = 'Final_Result'
 FS = 200
 
