@@ -1,15 +1,5 @@
 #include <Wire.h>
 #include <SparkFun_TMP117.h>
-#include <WiFiNINA.h>
-#include <WiFiUdp.h>
-
-// --- IMPOSTAZIONI DI RETE ---
-const char* SSID = "Arianna";        
-const char* PASSWORD = "ariannaa";   
-const char* PC_IP = "10.207.94.246"; // L'IP del PC che riceve i dati
-const int UDP_PORT = 5005;
-
-WiFiUDP udp;
 
 // --- IMPOSTAZIONI SENSORE ---
 TMP117 sensor;
@@ -17,7 +7,12 @@ const unsigned long sampleInterval = 100; // 10Hz (una lettura ogni 100ms)
 unsigned long lastSampleTime = 0;
 
 void setup() {
+  // Inizializza la comunicazione seriale USB a 115200 baud
   Serial.begin(115200);
+  while (!Serial) {
+    ; // Attendi l'apertura della porta seriale (necessario su alcune schede come Arduino Nano 33 IoT/UNO WiFi)
+  }
+
   Wire.begin();
 
   // Inizializza il sensore TMP117
@@ -26,22 +21,8 @@ void setup() {
     while (1); // Blocca l'esecuzione se il sensore non è presente
   }
 
-  // Connessione al Wi-Fi
-  Serial.print("Connessione in corso a: ");
-  Serial.println(SSID);
-  
-  WiFi.begin(SSID, PASSWORD);
-  
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  
-  Serial.println("\nConnesso! IP Board: ");
-  Serial.println(WiFi.localIP());
-
-  // Inizializza il protocollo UDP
-  udp.begin(UDP_PORT);
+  // Intestazione CSV (opzionale, utile se importi i dati in Excel o Python)
+  Serial.println("Tempo_ms,Temperatura_C");
 }
 
 void loop() {
@@ -55,18 +36,10 @@ void loop() {
     if (sensor.dataReady() == true) {
       float tempC = sensor.readTempC();
 
-      // Invia pacchetto UDP
-      udp.beginPacket(PC_IP, UDP_PORT);
-      
-      // Formato CSV: "tempo,temperatura"
-      udp.print(currentSampleTime);
-      udp.print(",");
-      udp.println(tempC, 4); // 4 decimali per alta precisione
-      
-      udp.endPacket();
-
-      // Debug opzionale su seriale
-      // Serial.println(tempC); 
+      // Invia i dati al PC tramite USB in formato CSV: "tempo,temperatura"
+      Serial.print(currentSampleTime);
+      Serial.print(",");
+      Serial.println(tempC, 4); // 4 decimali per alta precisione
     }
   }
 }
