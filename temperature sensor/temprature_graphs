@@ -1,0 +1,66 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# 1. Caricamento dei dati (assicurati che i nomi dei file siano corretti)
+df_base = pd.read_csv('temperature_baseline.csv')
+df_stress = pd.read_csv('temperature_stress.csv')
+
+# 2. Conversione del tempo da millisecondi a secondi
+df_base['Time (s)'] = df_base['Timestamp (ms)'] / 1000
+df_stress['Time (s)'] = df_stress['Timestamp (ms)'] / 1000
+
+# Imposta la griglia bianca
+sns.set_theme(style="whitegrid")
+
+# Crea una figura con due grafici affiancati, condividendo lo stesso asse Y
+fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+
+# Definiamo i colori per coerenza visiva
+color_normal = 'forestgreen'
+color_stress = 'red'
+
+# GRAFICO 1: BASELINE (RIPOSO) 
+# Tracciamo una singola linea continua, verde 
+axes[0].plot(df_base['Time (s)'], df_base['Temperatura (C)'], color=color_normal, linewidth=2)
+
+axes[0].set_title('Baseline Phase (Rest)', fontsize=14, fontweight='bold')
+axes[0].set_xlabel('Time (seconds)', fontsize=12)
+axes[0].set_ylabel('Skin Temperature (°C)', fontsize=12)
+
+# Fissiamo l'asse Y per entrambi i grafici (da 31 a 33 gradi)
+axes[0].set_ylim(31.0, 33.0)
+
+# GRAFICO 2: FASE DI STRESS
+# Troviamo il momento esatto di inizio stress.
+# Nota: .str.contains() per evitare errori legati a minuscole/maiuscole nei CSV
+stress_start_time = df_stress[df_stress['Stato Fisiologico'].str.contains('STRESS')]['Time (s)'].iloc[0]
+
+# Dividiamo il dataset per plottare i due colori (i due segmenti si toccano nel punto di inizio stress)
+df_normal_phase = df_stress[df_stress['Time (s)'] <= stress_start_time]
+df_stress_phase = df_stress[df_stress['Time (s)'] >= stress_start_time]
+
+# Tracciamo le due linee in sequenza
+axes[1].plot(df_normal_phase['Time (s)'], df_normal_phase['Temperatura (C)'], 
+             color=color_normal, linewidth=2, label='NORMAL')
+axes[1].plot(df_stress_phase['Time (s)'], df_stress_phase['Temperatura (C)'], 
+             color=color_stress, linewidth=2, label='STRESS (Vasoconstriction)')
+
+axes[1].set_title('Cognitive Stress Phase', fontsize=14, fontweight='bold')
+axes[1].set_xlabel('Time (seconds)', fontsize=12)
+
+# Aggiungiamo la legenda
+axes[1].legend(title='Detected State', fontsize=10, title_fontsize=11)
+
+# Linea tratteggiata per marcare visivamente l'inizio dello stress
+axes[1].axvline(x=stress_start_time, color=color_stress, linestyle='--', linewidth=1.5)
+axes[1].text(stress_start_time + 2, 32.1, 'Stress Onset', 
+             color=color_stress, fontweight='bold', fontsize=11)
+
+# TITOLO GLOBALE E SALVATAGGIO
+plt.suptitle('Skin Temperature Variation: Rest vs Stress', fontsize=16, fontweight='bold')
+plt.tight_layout()
+
+# Salva l'immagine finale
+plt.savefig('skin_temperature.png', dpi=300, bbox_inches='tight')
+plt.show()
