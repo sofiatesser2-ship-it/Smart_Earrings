@@ -3,16 +3,23 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import find_peaks, welch
 from scipy.interpolate import interp1d
+from pathlib import Path
 
 # IMPOSTAZIONI
-FILE_PATH = 'chiara_baseline3.csv'
+FILE_PATH = '140526.3.csv'
 COLONNA_SEGNALE = 'Final_Result'
 FS = 200
 
 def analizza_da_csv(path, colonna, fs):
     # 1. Caricamento dati
     try:
-        df = pd.read_csv(path)
+        script_dir = Path(__file__).resolve().parent
+        percorso_completo = script_dir.parent / 'acquisizioni_confronto' / path
+        
+        # Spostiamo il print all'inizio assoluto del try per essere sicuri che lo legga
+        print(f"--> Tentativo di apertura: {percorso_completo}")
+        
+        df = pd.read_csv(percorso_completo)
         signal = df[colonna].values
     except Exception as e:
         return f"Errore nel caricamento: {e}"
