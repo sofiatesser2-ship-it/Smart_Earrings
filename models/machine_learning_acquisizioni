@@ -1,0 +1,219 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Sklearn: Preprocessing, Metriche e Validazione
+from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold, TimeSeriesSplit
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+from sklearn.preprocessing import LabelEncoder
+from sklearn.pipeline import Pipeline
+from sklearn.inspection import permutation_importance 
+from sklearn.utils.class_weight import compute_class_weight
+
+# Modelli
+from sklearn.ensemble import RandomForestClassifier
+from lightgbm import LGBMClassifier
+
+# Ottimizzazione
+import optuna
+
+# VARIABILI GLOBALI 
+SEED = 356
+FILE_PATH = 'features_extraction_binary.csv'
+FEATURES = ['BPM', 'RMSSD', 'SDNN', 'PNN50', 'SD1', 'SD2', 'LF_HF']
+GROUP_COL = 'Subject' 
+
+# ==========================================
+# PARTE 1: FUNZIONI COMUNI
+# ==========================================
+
+def load_and_prepare_data(file_path):
+    df = pd.read_csv(file_path).dropna()
+    
+    # DISTINZIONE BINARIA: Teniamo solo Stress e Baseline
+    df = df[df['Label'].isin(['Stress', 'Baseline'])]
+    
+    X = df[FEATURES]
+    y = df['Label']
+    groups = df[GROUP_COL] 
+
+    # Split con stratificazione
+    X_train, X_test, y_train, y_test, groups_train, _ = train_test_split(
+        X, y, groups, test_size=0.2, random_state=SEED, stratify=y 
+    )
+
+    # CALCOLO PESI CLASSI
+    classes = np.unique(y_train)
+    weights = compute_class_weight(class_weight='balanced', classes=classes, y=y_train)
+    weights_dict = dict(zip(classes, weights))
+
+    print(f"Classi rilevate: {classes}")
+    print(f"Pesi calcolati per bilanciamento:\n{weights_dict}")
+    return X_train, X_test, y_train, y_test, groups_train, weights_dict
+
+def plot_importance(clf, X_test, y_test, model_name):
+    plt.figure(figsize=(9, 6))
+    importances = None
+    names = FEATURES
+
+    if hasattr(clf, 'feature_importances_'):
+        importances = clf.feature_importances_
+    else:
+        result = permutation_importance(clf, X_test, y_test, n_repeats=5, random_state=SEED)
+        importances = result.importances_mean
+
+    indices = np.argsort(importances)
+    plt.barh(range(len(importances)), importances[indices], color='steelblue', edgecolor='black')
+    plt.yticks(range(len(importances)), [names[i] for i in indices])
+    plt.title(f'Feature Importance: {model_name}')
+    plt.xlabel('Punteggio Importanza')
+    plt.grid(axis='x', linestyle='--', alpha=0.6)
+    plt.tight_layout()
+    plt.show()
+
+def evaluate_model(clf, X_test, y_test, model_name="Modello", label_encoder=None):
+    y_pred = clf.predict(X_test)
+    if label_encoder is not None:
+        y_pred_labels = label_encoder.inverse_transform(y_pred)
+        y_test_labels = y_test if isinstance(y_test.iloc[0], str) else label_encoder.inverse_transform(y_test)
+        classes = label_encoder.classes_
+    else:
+        y_pred_labels = y_pred
+        y_test_labels = y_test
+        classes = clf.classes_ if hasattr(clf, 'classes_') else np.unique(y_test)
+    
+    acc = accuracy_score(y_test_labels, y_pred_labels)
+    print(f"\n--- PERFORMANCE: {model_name} (Acc: {acc:.4f}) ---")
+    print(classification_report(y_test_labels, y_pred_labels))
+
+    plt.figure(figsize=(6, 4))
+    cm = confusion_matrix(y_test_labels, y_pred_labels)
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=classes, yticklabels=classes)
+    plt.title(f'Matrice di Confusione: {model_name}')
+    plt.ylabel('Effettivo')
+    plt.xlabel('Predetto')
+    plt.show()
+
+    plot_importance(clf, X_test, y_test, model_name)
+
+# ==========================================
+# PARTE 2: TRAINING DEI MODELLI
+# ==========================================
+
+# 1. RANDOM FOREST
+def train_random_forest(X_train, y_train, weights_dict):
+    print("\n[Optuna] Inizio ottimizzazione Random Forest...")
+    
+    def objective(trial):
+        param = {
+            'n_estimators': trial.suggest_int('n_estimators', 50, 300),
+            'max_depth': trial.suggest_int('max_depth', 3, 20),
+            'min_samples_split': trial.suggest_int('min_samples_split', 2, 10),
+            'criterion': trial.suggest_categorical('criterion', ['gini', 'entropy']),
+            'class_weight': weights_dict,
+            'random_state': SEED,
+            'n_jobs': -1
+        }
+        
+        clf = RandomForestClassifier(**param)
+        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
+        score = cross_val_score(clf, X_train, y_train, cv=cv, scoring='f1_macro').mean()
+        return score
+
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=30) # Ridotto a 30 per velocizzare, aumenta pure a 50 se serve
+
+    print(f"Migliori parametri RF: {study.best_params}")
+    
+    best_clf = RandomForestClassifier(**study.best_params, class_weight=weights_dict, random_state=SEED)
+    best_clf.fit(X_train, y_train)
+    return best_clf
+
+# 2. LIGHTGBM con TimeSeriesSplit
+def train_lightgbm(X_train, y_train, weights_dict):
+    print("\n[Optuna] Inizio ottimizzazione LightGBM...")
+    le = LabelEncoder()
+    y_train_encoded = le.fit_transform(y_train)
+    
+    # mappiamo i pesi numerici sui target encodati (0 e 1)
+    encoded_weights_dict = {le.transform([k])[0]: v for k, v in weights_dict.items()}
+    sample_weights = np.array([encoded_weights_dict[cls] for cls in y_train_encoded])
+    
+    def objective(trial):
+        param = {
+            'num_leaves': trial.suggest_int('num_leaves', 20, 100),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
+            'n_estimators': trial.suggest_int('n_estimators', 50, 200),
+            'random_state': SEED, 'n_jobs': -1, 'verbose': -1
+        }
+        clf = LGBMClassifier(**param)
+        cv = TimeSeriesSplit(n_splits=5)
+        
+        # Corretto il passaggio di sample_weight tramite fit_params coerente con sklearn moderno
+        score = cross_val_score(
+            clf, X_train, y_train_encoded, cv=cv, scoring='f1_macro', 
+            fit_params={'sample_weight': sample_weights}
+        ).mean()
+        return score
+
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=30)
+    
+    print(f"Migliori parametri LightGBM: {study.best_params}")
+    
+    best_clf = LGBMClassifier(**study.best_params, random_state=SEED, verbose=-1)
+    best_clf.fit(X_train, y_train_encoded, sample_weight=sample_weights)
+    return best_clf, le
+
+# ==========================================
+# PARTE 3: ESECUZIONE
+# ==========================================
+
+if __name__ == "__main__":
+    # Caricamento dati (filtrati solo Stress e Baseline)
+    X_train, X_test, y_train, y_test, groups_train, weights_vector = load_and_prepare_data(FILE_PATH)
+    
+    # 1. Random Forest
+    rf = train_random_forest(X_train, y_train, weights_vector)
+    evaluate_model(rf, X_test, y_test, "Random Forest")
+    
+    # 2. LightGBM
+    lgb, le_lgb = train_lightgbm(X_train, y_train, weights_vector)
+    evaluate_model(lgb, X_test, y_test, "LightGBM", le_lgb)
+
+    # ==========================================
+    # CONFRONTO FINALE
+    # ==========================================
+    print("\n" + "="*50)
+    print("SINTESI FINALE DELLE PERFORMANCE (STRESS vs BASELINE)")
+    print("="*50)
+
+    final_scores = {
+        "Random Forest": accuracy_score(y_test, rf.predict(X_test)),
+        "LightGBM": accuracy_score(y_test, le_lgb.inverse_transform(lgb.predict(X_test)))
+    }
+
+    # Ordino i modelli dal migliore al peggiore
+    sorted_models = dict(sorted(final_scores.items(), key=lambda item: item[1], reverse=True))
+
+    # Creazione del grafico di confronto
+    plt.figure(figsize=(8, 5))
+    bars = plt.bar(sorted_models.keys(), sorted_models.values(), color=['#4C72B0', '#55A868'])
+
+    # Percentuali sopra le barre
+    for bar in bars:
+        yval = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width()/2, yval + 0.01, f'{yval:.2%}', ha='center', fontweight='bold')
+
+    plt.title('Confronto Accuratezza Finale (Classificazione Binaria)', fontsize=12)
+    plt.ylabel('Accuracy Score')
+    plt.ylim(0, 1.1)
+    plt.grid(axis='y', alpha=0.3)
+    plt.show()
+
+    # Verdetto finale stampato
+    vincitore = list(sorted_models.keys())[0]
+    print(f"MODELLO VINCITORE: {vincitore}")
+    print(f"Accuratezza raggiunta: {sorted_models[vincitore]:.4f}")
+    print("="*50)
