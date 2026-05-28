@@ -2,39 +2,56 @@ import pandas as pd
 import numpy as np
 import os
 import re
-from scipy.signal import welch, find_peaks
+from scipy.signal import welch, find_peaks, butter, filtfilt
 from scipy.interpolate import interp1d
+from pathlib import Path
 
 # --- 1. FUNZIONI DI CALCOLO METRICHE HRV ---
 
 def calculate_poincare_features(ibi_ms):
-    if len(ibi_ms) < 2: return np.nan, np.nan
+    if len(ibi_ms) < 2: 
+        return np.nan, np.nan
     diff_ibi = np.diff(ibi_ms)
-    sd1 = np.sqrt(np.std(diff_ibi, ddof=1)**2 * 0.5)
-    sd2 = np.sqrt(2 * np.std(ibi_ms, ddof=1)**2 - 0.5 * np.std(diff_ibi, ddof=1)**2)
+    
+    # Formule standard e matematicamente stabili per Poincaré
+    sd1 = np.std(diff_ibi, ddof=1) / np.sqrt(2)
+    
+    var_ibi = np.var(ibi_ms, ddof=1)
+    var_diff = np.var(diff_ibi, ddof=1)
+    
+    # Protezione da radice negativa dovuta ad approssimazioni numeriche o rumore
+    sd2_tmp = 2 * var_ibi - 0.5 * var_diff
+    sd2 = np.sqrt(max(0, sd2_tmp))
+    
     return sd1, sd2
 
 def calculate_pnn50(ibi_ms):
-    if len(ibi_ms) < 2: return np.nan
+    if len(ibi_ms) < 2: 
+        return np.nan
     diff_ibi = np.abs(np.diff(ibi_ms))
     nn50 = np.sum(diff_ibi > 50)
     return (nn50 / len(diff_ibi)) * 100
 
 def calculate_lf_hf(ibi_ms):
     try:
-        if len(ibi_ms) < 20: return np.nan
+        if len(ibi_ms) < 20: 
+            return np.nan
         times = np.cumsum(ibi_ms) / 1000.0
         f_interp = interp1d(times, ibi_ms, kind='cubic', fill_value="extrapolate")
-        t_res = np.arange(times[0], times[-1], 0.25)
+        
+        fs_interp = 4.0  # Hz
+        t_res = np.arange(times[0], times[-1], 1.0 / fs_interp)
+        if len(t_res) < 10: 
+            return np.nan
         
         signal = f_interp(t_res)
         
-        # CORREZIONE: Detrendizzazione lineare anziché solo rimozione della media
-        # Rimuove le derive lente che gonfiano artificialmente la banda LF
+        # Detrendizzazione lineare per rimuovere le derive lente
         signal = signal - np.polyval(np.polyfit(t_res, signal, 1), t_res)
         
+        # nperseg dinamico basato sulla lunghezza per un overlap ottimale
         nperseg = min(len(signal), 256)
-        f, psd = welch(signal, fs=4, nperseg=nperseg)
+        f, psd = welch(signal, fs=fs_interp, nperseg=nperseg, noverlap=nperseg//2)
         
         lf = np.sum(psd[(f >= 0.04) & (f <= 0.15)])
         hf = np.sum(psd[(f >= 0.15) & (f <= 0.40)])
@@ -44,9 +61,16 @@ def calculate_lf_hf(ibi_ms):
         return np.nan
 
 def clean_ibi(ibi_ms):
-    # Intervallo fisiologico standard dei battiti (da 45 a 150 BPM)
+    # Intervallo fisiologico standard (da 45 a 150 BPM)
     clean = ibi_ms[(ibi_ms >= 400) & (ibi_ms <= 1300)]
-    return clean if len(clean) >= 20 else np.array([])
+    return clean if len(clean) >= 15 else np.array([])
+
+def butter_bandpass_filter(data, lowcut=0.5, highcut=4.0, fs=200.0, order=2):
+    nyq = 0.5 * fs
+    low = lowcut / nyq
+    high = highcut / nyq
+    b, a = butter(order, [low, high], btype='band')
+    return filtfilt(b, a, data)
 
 # --- 2. ELABORAZIONE DEL SEGNALE PPG DIRETTO ---
 
@@ -62,7 +86,6 @@ def process_ppg_file(file_path, subject_name, condition):
             return []
             
         df = df.dropna(subset=[col_time, col_target])
-        
         signal = df[col_target].values
         timestamps_ms = df[col_time].values
         
@@ -73,9 +96,14 @@ def process_ppg_file(file_path, subject_name, condition):
     if len(signal) < 1000:
         return []
 
+    # Pre-filtraggio per stabilizzare la linea di base prima del peak detection
+    try:
+        filtered_signal = butter_bandpass_filter(signal, fs=200.0)
+    except:
+        filtered_signal = signal  # Fallback se il segnale è troppo corto per il filtro
+
     # 1. RILEVAMENTO PICCHI ADATTIVO 
-    # Usiamo una prominence fissa e una distanza minima realistica (a 200Hz, 80 campioni = 400ms, max 150 BPM)
-    peaks, _ = find_peaks(signal, distance=80, prominence=np.percentile(signal, 75) * 0.15)
+    peaks, _ = find_peaks(filtered_signal, distance=80, prominence=np.percentile(filtered_signal, 75) * 0.15)
     
     if len(peaks) < 10:
         return []
@@ -86,7 +114,7 @@ def process_ppg_file(file_path, subject_name, condition):
     dt = 1000.0 / fs
 
     for p in peaks:
-        if p > 0 and p < len(signal) - 1:
+        if 0 < p < len(signal) - 1:
             y1 = signal[p-1]
             y2 = signal[p]
             y3 = signal[p+1]
@@ -98,7 +126,7 @@ def process_ppg_file(file_path, subject_name, condition):
 
     refined_peak_times_ms = np.array(refined_peak_times_ms)
     
-    # 2. RIMOZIONE FILTRATA DEGLI ARTEFATTI (Outlier Protection)
+    # 2. RIMOZIONE FILTRATA DEGLI ARTEFATTI (Outlier Protection Avanzata)
     raw_ibi = np.diff(refined_peak_times_ms)
     raw_offsets_sec = (refined_peak_times_ms / 1000.0)[1:]
     
@@ -106,11 +134,12 @@ def process_ppg_file(file_path, subject_name, condition):
     valid_offsets = []
     
     for i in range(len(raw_ibi)):
-        start_idx = max(0, i-4)
-        end_idx = min(len(raw_ibi), i+4)
+        start_idx = max(0, i-5)
+        end_idx = min(len(raw_ibi), i+5)
         local_median = np.median(raw_ibi[start_idx:end_idx])
         
-        if (400 <= raw_ibi[i] <= 1300) and (abs(raw_ibi[i] - local_median) < 0.2 * local_median):
+        # Un battito non può variare improvvisamente più del 12% rispetto alla mediana locale
+        if (400 <= raw_ibi[i] <= 1300) and (abs(raw_ibi[i] - local_median) < 0.12 * local_median):
             valid_ibi.append(raw_ibi[i])
             valid_offsets.append(raw_offsets_sec[i])
             
@@ -132,15 +161,14 @@ def process_ppg_file(file_path, subject_name, condition):
     label = 'Baseline' if condition == 'baseline' else 'Stress'
 
     for sw in np.arange(min_time, max_time - win_hrv_size, step):
-        # Finestra corta (1 minuto) per BPM, RMSSD, SDNN, PNN50, SD1, SD2
+        # Finestra corta (1 minuto)
         mask_short = (ibi_offsets_sec >= sw) & (ibi_offsets_sec < sw + win_hrv_size)
         win_short = clean_ibi(ibi_values[mask_short])
         
-        # Finestra lunga (2 minuti) per LF_HF, sincronizzata alla fine della finestra corta
+        # Finestra lunga (2 minuti) sincronizzata alla fine della finestra corta
         mask_long = (ibi_offsets_sec >= (sw + win_hrv_size - win_lfhf_size)) & (ibi_offsets_sec < sw + win_hrv_size)
         win_long = clean_ibi(ibi_values[mask_long])
         
-        # Generiamo il record se la finestra da un minuto ha dati sufficienti
         if len(win_short) >= 15:
             bpm = 60000 / np.mean(win_short)
             rmssd = np.sqrt(np.mean(np.diff(win_short)**2))
@@ -148,11 +176,8 @@ def process_ppg_file(file_path, subject_name, condition):
             pnn50 = calculate_pnn50(win_short)
             sd1, sd2 = calculate_poincare_features(win_short)
             
-            # Calcoliamo LF_HF sui 2 minuti solo se siamo abbastanza avanti nel file da coprire l'intera finestra
-            if len(win_long) >= 20:
-                lf_hf = calculate_lf_hf(win_long)
-            else:
-                lf_hf = np.nan
+            # Calcoliamo LF_HF sui 2 minuti solo se i dati sono sufficienti
+            lf_hf = calculate_lf_hf(win_long) if len(win_long) >= 20 else np.nan
             
             features.append({
                 'Subject': subject_name.upper(),
@@ -165,12 +190,10 @@ def process_ppg_file(file_path, subject_name, condition):
 
 # --- 3. PROCESSO PRINCIPALE ---
 
-from pathlib import Path
-
 if __name__ == "__main__":
     BASE_PATH = Path(__file__).resolve().parents[1]
     
-    # Gestione robusta del nome della cartella (con o senza errore di battitura)
+    # Gestione robusta del nome della cartella
     DATA_PATH = BASE_PATH / 'acquisizoni_stress'
     if not DATA_PATH.exists():
         DATA_PATH = BASE_PATH / 'acquisizioni_stress'
@@ -203,7 +226,7 @@ if __name__ == "__main__":
                     person_features[soggetto] = []
                 person_features[soggetto].extend(extracted_data)
 
-    # Normalizzazione per PERSONA
+    # Normalizzazione per PERSONA bloccata e priva di bug matematici
     all_dfs = []
     for persona, data_list in person_features.items():
         df_person = pd.DataFrame(data_list)
@@ -212,17 +235,27 @@ if __name__ == "__main__":
             print(f"⚠️ Soggetto {persona.upper()} saltato: manca del tutto la Baseline o dati insufficienti.")
             continue
             
-        # Non droppiamo subito LF_HF qui per non perdere le righe che hanno solo i NaN dovuti alla finestra da 2 min
-        df_person = df_person.dropna(subset=['BPM', 'RMSSD', 'SDNN', 'PNN50', 'SD1', 'SD2'])
         cols = ['BPM', 'RMSSD', 'SDNN', 'PNN50', 'SD1', 'SD2', 'LF_HF']
         
-        person_base_means = df_person[df_person['Label'] == 'Baseline'][cols].mean()
+        # Elimina i NaN sulle metriche core temporali PRIMA del calcolo delle medie di baseline
+        df_person = df_person.dropna(subset=['BPM', 'RMSSD', 'SDNN', 'PNN50', 'SD1', 'SD2'])
+        
+        baseline_df = df_person[df_person['Label'] == 'Baseline']
+        if len(baseline_df) == 0:
+            continue
+            
+        person_base_means = baseline_df[cols].mean()
+        
         if person_base_means.drop('LF_HF').isnull().any():
             continue
             
+        # Divisione sicura colonna per colonna
         for c in cols:
-            if person_base_means[c] > 0:
-                df_person[c] = df_person[c] / person_base_means[c]
+            mean_val = person_base_means[c]
+            if pd.notnull(mean_val) and mean_val > 0:
+                df_person[c] = df_person[c] / mean_val
+            elif c == 'LF_HF':
+                df_person[c] = np.nan  # Mantiene coerenti i dati se LF_HF non è calcolabile in baseline
                 
         all_dfs.append(df_person)
         print(f"✅ Normalizzazione completata con successo per il soggetto: {persona.upper()}")
@@ -240,7 +273,7 @@ if __name__ == "__main__":
         print("📊 REPORT DI VERIFICA DEI DATI (MEDIE NORMALIZZATE)")
         print("="*65)
         print("💡 Linee guida per il controllo:")
-        print("  - Baseline: i valori DEVONO essere uguali o vicinissimi a 1.0.")
+        print("  - Baseline: i valori DEVONO essere uguali a 1.000.")
         print("  - Stress: ci si aspetta BPM > 1.0 e metriche HRV (RMSSD, SDNN...) < 1.0.\n")
         
         metric_cols = ['BPM', 'RMSSD', 'SDNN', 'PNN50', 'SD1', 'SD2', 'LF_HF']
@@ -252,7 +285,6 @@ if __name__ == "__main__":
         print(final_df.groupby(['Subject', 'Label'])[metric_cols].mean().round(3))
         
         print("\n--- VERIFICA INTEGRITÀ E RECORD ---")
-        # Conta quanti NaN ci sono (principalmente saranno nella colonna LF_HF all'inizio dei file brevi)
         print(f"🔍 Valori NaN/Nulli residui: {final_df[metric_cols].isnull().sum().to_dict()}")
         print("\nDistribuzione record per Persona:")
         print(final_df.groupby('Subject').size())
