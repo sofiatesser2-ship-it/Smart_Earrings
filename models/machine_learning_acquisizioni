@@ -136,25 +136,21 @@ def train_lightgbm(X_train, y_train, weights_dict):
     le = LabelEncoder()
     y_train_encoded = le.fit_transform(y_train)
     
-    # mappiamo i pesi numerici sui target encodati (0 e 1)
-    encoded_weights_dict = {le.transform([k])[0]: v for k, v in weights_dict.items()}
-    sample_weights = np.array([encoded_weights_dict[cls] for cls in y_train_encoded])
-    
     def objective(trial):
         param = {
             'num_leaves': trial.suggest_int('num_leaves', 20, 100),
             'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
             'n_estimators': trial.suggest_int('n_estimators', 50, 200),
-            'random_state': SEED, 'n_jobs': -1, 'verbose': -1
+            'class_weight': 'balanced', # <--- Gestito nativamente senza passare sample_weight esternamente
+            'random_state': SEED, 
+            'n_jobs': -1, 
+            'verbose': -1
         }
         clf = LGBMClassifier(**param)
         cv = TimeSeriesSplit(n_splits=5)
         
-        # Corretto il passaggio di sample_weight tramite fit_params coerente con sklearn moderno
-        score = cross_val_score(
-            clf, X_train, y_train_encoded, cv=cv, scoring='f1_macro', 
-            fit_params={'sample_weight': sample_weights}
-        ).mean()
+        # cross_val_score ora è pulito e privo di parametri aggiuntivi a rischio errore
+        score = cross_val_score(clf, X_train, y_train_encoded, cv=cv, scoring='f1_macro').mean()
         return score
 
     study = optuna.create_study(direction='maximize')
@@ -162,8 +158,9 @@ def train_lightgbm(X_train, y_train, weights_dict):
     
     print(f"Migliori parametri LightGBM: {study.best_params}")
     
-    best_clf = LGBMClassifier(**study.best_params, random_state=SEED, verbose=-1)
-    best_clf.fit(X_train, y_train_encoded, sample_weight=sample_weights)
+    # Addestramento finale con i migliori parametri
+    best_clf = LGBMClassifier(**study.best_params, class_weight='balanced', random_state=SEED, verbose=-1)
+    best_clf.fit(X_train, y_train_encoded)
     return best_clf, le
 
 # ==========================================
