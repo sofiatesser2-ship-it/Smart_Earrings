@@ -20,7 +20,7 @@ import optuna
 
 # VARIABILI GLOBALI 
 SEED = 356
-FILE_PATH = 'features_extraction_binary.csv'
+FILE_PATH = 'features_extraction_binary_WESAD.csv'
 FEATURES = ['BPM', 'RMSSD', 'SDNN', 'PNN50', 'SD1', 'SD2', 'LF_HF']
 GROUP_COL = 'Subject' 
 
