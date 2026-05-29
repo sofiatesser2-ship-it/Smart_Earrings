@@ -3,7 +3,7 @@ import pandas as pd
 import seaborn as sns
 
 # 1. Carica il dataset
-file_path = "features_extraction_new_dataset.csv"
+file_path = "features_extraction_binary.csv"
 df = pd.read_csv(file_path)
 
 features = ["BPM", "RMSSD", "SDNN", "PNN50", "SD1", "SD2", "LF_HF"]
