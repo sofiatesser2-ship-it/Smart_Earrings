@@ -23,9 +23,9 @@ import optuna
 
 # VARIABILI GLOBALI 
 SEED = 356
-FILE_PATH = 'data/features_extraction.csv'
+FILE_PATH = 'features_extraction_WESAD.csv'
 FEATURES = ['BPM', 'RMSSD', 'SDNN', 'PNN50', 'SD1', 'SD2', 'LF_HF']
-GROUP_COL = 'Subject' # <--- NUOVO (Assicurati che esista nel CSV)
+GROUP_COL = 'Subject' 
 
 # ==========================================
 # PARTE 1: FUNZIONI COMUNI
