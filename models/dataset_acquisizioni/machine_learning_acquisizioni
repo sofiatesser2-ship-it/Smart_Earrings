@@ -86,13 +86,13 @@ def plot_importance(clf, X_test, y_test, model_name):
     plt.barh(range(len(importances)), importances[indices], color='steelblue', edgecolor='black')
     plt.yticks(range(len(importances)), [names[i] for i in indices])
     plt.title(f'Feature Importance: {model_name}')
-    plt.xlabel('Punteggio Importanza')
+    plt.xlabel('Importance Score')    
     plt.grid(axis='x', linestyle='--', alpha=0.6)
     plt.tight_layout()
     plt.show()
 
 
-def evaluate_model(clf, X_test, y_test, model_name="Modello", label_encoder=None):
+def evaluate_model(clf, X_test, y_test, model_name="Model", label_encoder=None):
     y_pred = clf.predict(X_test)
     if label_encoder is not None:
         y_pred_labels = label_encoder.inverse_transform(y_pred)
@@ -105,15 +105,15 @@ def evaluate_model(clf, X_test, y_test, model_name="Modello", label_encoder=None
         classes = clf.classes_ if hasattr(clf, 'classes_') else np.unique(y_test)
     
     acc = accuracy_score(y_test_labels, y_pred_labels)
-    print(f"\n--- PERFORMANCE SUL NUOVO TEST SET: {model_name} (Acc: {acc:.4f}) ---")
+    print(f"\n--- PERFORMANCE ON TEST SET: {model_name} (Acc: {acc:.4f}) ---")
     print(classification_report(y_test_labels, y_pred_labels))
 
     plt.figure(figsize=(6, 4))
     cm = confusion_matrix(y_test_labels, y_pred_labels)
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=classes, yticklabels=classes)
-    plt.title(f'Matrice di Confusione: {model_name}')
-    plt.ylabel('Effettivo (Acquisizioni)')
-    plt.xlabel('Predetto')
+    plt.title(f'Confusion Matrix: {model_name}')
+    plt.ylabel('Actual (Acquisitions)')
+    plt.xlabel('Predicted')
     plt.show()
 
     plot_importance(clf, X_test, y_test, model_name)
@@ -208,7 +208,7 @@ if __name__ == "__main__":
     # CONFRONTO FINALE (Sulle Nuove Acquisizioni)
     # ==========================================
     print("\n" + "="*50)
-    print("SINTESI FINALE DELLE PERFORMANCE SULLE NUOVE ACQUISIZIONI")
+    print("FINAL PERFORMANCE SUMMARY ON OUR ACQUISITIONS")
     print("="*50)
 
     final_scores = {
@@ -228,7 +228,7 @@ if __name__ == "__main__":
         yval = bar.get_height()
         plt.text(bar.get_x() + bar.get_width()/2, yval + 0.01, f'{yval:.2%}', ha='center', fontweight='bold')
 
-    plt.title('Confronto Accuratezza su Dati di Acquisizione Esterni', fontsize=12)
+    plt.title('Accuracy Comparison', fontsize=12)
     plt.ylabel('Accuracy Score')
     plt.ylim(0, 1.1)
     plt.grid(axis='y', alpha=0.3)
@@ -236,6 +236,6 @@ if __name__ == "__main__":
 
     # Verdetto finale stampato
     vincitore = list(sorted_models.keys())[0]
-    print(f"MODELLO VINCITORE: {vincitore}")
-    print(f"Accuratezza raggiunta sulle acquisizioni: {sorted_models[vincitore]:.4f}")
+    print(f"Winning Model: {vincitore}")
+    print(f"Accuracy: {sorted_models[vincitore]:.4f}")
     print("="*50)
