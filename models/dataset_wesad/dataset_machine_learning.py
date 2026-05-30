@@ -71,7 +71,7 @@ def plot_importance(clf, X_test, y_test, model_name):
     plt.barh(range(len(importances)), importances[indices], color='steelblue', edgecolor='black')
     plt.yticks(range(len(importances)), [names[i] for i in indices])
     plt.title(f'Feature Importance: {model_name}')
-    plt.xlabel('Punteggio Importanza')
+    plt.xlabel('Importance Score')
     plt.grid(axis='x', linestyle='--', alpha=0.6)
     plt.tight_layout()
     plt.show()
@@ -94,7 +94,7 @@ def evaluate_model(clf, X_test, y_test, model_name="Modello", label_encoder=None
     plt.figure(figsize=(6, 4))
     cm = confusion_matrix(y_test_labels, y_pred_labels)
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=classes, yticklabels=classes)
-    plt.title(f'Matrice di Confusione: {model_name}')
+    plt.title(f'Confusion Matrix: {model_name}')
     plt.show()
 
     plot_importance(clf, X_test, y_test, model_name)
@@ -258,7 +258,7 @@ for bar in bars:
     yval = bar.get_height()
     plt.text(bar.get_x() + bar.get_width()/2, yval + 0.01, f'{yval:.2%}', ha='center', fontweight='bold')
 
-plt.title('Confronto Accuratezza Finale', fontsize=14)
+plt.title('Accuracy Comparison', fontsize=14)
 plt.ylabel('Accuracy Score')
 plt.ylim(0, 1.1)
 plt.grid(axis='y', alpha=0.3)
