@@ -3,7 +3,7 @@ import pandas as pd
 import seaborn as sns
 
 # 1. Carica il dataset
-file_path = "features_extraction_binary.csv"
+file_path = "features_extraction_acquisizioni.csv"
 df = pd.read_csv(file_path)
 
 features = ["BPM", "RMSSD", "SDNN", "PNN50", "SD1", "SD2", "LF_HF"]
@@ -15,9 +15,11 @@ sns.set_theme(style="white", context="paper")
 plt.rcParams.update(
     {
         "font.family": "sans-serif",
-        "font.size": 11,
-        "axes.labelsize": 12,
-        "axes.titlesize": 14,
+        "font.size": 14,          # Dimensione base
+        "axes.labelsize": 16,     # INGRANDISCI: Label degli assi (es. "Normalized Value")
+        "axes.titlesize": 16,     # INGRANDISCI: Titolo del singolo grafico (es. "BPM")
+        "xtick.labelsize": 14,    # INGRANDISCI: Scritte sotto (Baseline/Stress)
+        "ytick.labelsize": 14,
     }
 )
 
@@ -117,5 +119,5 @@ if len(features) < len(axes_flat):
     axes_flat[-1].set_visible(False)
 
 plt.tight_layout()
-plt.subplots_adjust(top=0.88, hspace=0.3, wspace=0.25)
+plt.subplots_adjust(left=0.06,top=0.88, hspace=0.3, wspace=0.25)
 plt.show()
